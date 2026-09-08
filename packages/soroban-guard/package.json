@@ -1,0 +1,28 @@
+{
+  "name": "soroban-guard",
+  "version": "0.0.0",
+  "description": "Conformance testing for deployed SEP-41 Soroban token contracts",
+  "license": "Apache-2.0",
+  "author": "Sergei Birtanov",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "sep41-guard": "./src/cli.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.0.1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
