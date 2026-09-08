@@ -1,23 +1,27 @@
 {
-  "name": "soroban-guard-monorepo",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Conformance testing for deployed SEP-41 Soroban token contracts",
-  "license": "Apache-2.0",
-  "author": "birserg",
-  "type": "module",
-  "scripts": {
-    "typecheck": "pnpm -r typecheck"
-  },
-  "devDependencies": {
-    "typescript": "^7.0.2"
-  },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "12.3.4",
-      "onFail": "download"
-    }
-  },
-  "packageManager": "pnpm@12.3.4"
+	"name": "soroban-guard-monorepo",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Conformance testing for deployed SEP-41 Soroban token contracts",
+	"license": "Apache-2.0",
+	"author": "birserg",
+	"type": "module",
+	"scripts": {
+		"typecheck": "pnpm -r typecheck",
+		"check": "biome check --write .",
+		"check:ci": "biome check .",
+		"test": "pnpm -r test"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.12",
+		"typescript": "^7.0.2"
+	},
+	"devEngines": {
+		"packageManager": {
+			"name": "pnpm",
+			"version": "12.3.4",
+			"onFail": "download"
+		}
+	},
+	"packageManager": "pnpm@12.3.4"
 }
