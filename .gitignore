@@ -4,3 +4,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 *.log
+
+# Secrets — never commit keys
+.env
+.env.*
+!.env.example
+*.key

@@ -3,7 +3,18 @@
 Conformance testing for deployed [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
 Soroban token contracts on Stellar.
 
-> **Status: work in progress.** Nothing here works yet.
+> **Status: early.** Read checks (`decimals`, `balance`, `allowance`)
+> run against testnet; writes and negative checks are next.
+
+## Usage
+
+```sh
+cp .env.example .env  # fill in TESTNET_CONTRACT_ID, OWNER_ADDRESS, SPENDER_ADDRESS
+pnpm install
+pnpm typecheck && pnpm exec biome check . && pnpm test          # offline
+set -a; source .env; set +a; pnpm test:live                     # testnet
+set -a; source .env; set +a; node packages/soroban-guard/src/cli.ts "$TESTNET_CONTRACT_ID"
+```
 
 ## Why
 

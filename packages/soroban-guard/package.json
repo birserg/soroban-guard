@@ -26,6 +26,7 @@
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
+		"sep41-guard": "node src/cli.ts",
 		"test": "vitest run tests/unit",
 		"test:live": "vitest run tests/live",
 		"test:watch": "vitest"
