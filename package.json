@@ -10,11 +10,12 @@
 		"typecheck": "pnpm -r typecheck",
 		"check": "biome check --write .",
 		"check:ci": "biome check .",
-		"test": "pnpm -r test"
+		"test": "pnpm -r test",
+		"test:live": "pnpm -r test:live"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",
-		"typescript": "^7.0.2"
+		"typescript": "7.0.2"
 	},
 	"devEngines": {
 		"packageManager": {

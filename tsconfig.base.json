@@ -7,10 +7,15 @@
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"verbatimModuleSyntax": true,
+		// Garbage-free runtime: the bin executes TS sources directly via
+		// Node type stripping, so only erasable syntax is allowed.
+		"erasableSyntaxOnly": true,
 		"allowImportingTsExtensions": true,
 		"rewriteRelativeImportExtensions": true,
 		"skipLibCheck": true,
 		"declaration": true,
-		"sourceMap": true
+		"sourceMap": true,
+		// TS7 does not auto-include node_modules/@types: list what we need.
+		"types": ["node"]
 	}
 }
