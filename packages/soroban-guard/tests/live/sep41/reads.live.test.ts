@@ -30,6 +30,7 @@ describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 				networkPassphrase: PASSPHRASE,
 				owner: OWNER,
 				spender: SPENDER,
+				ownerIsThrowaway: false,
 				specFunctions: inspected.kind === "wasm" ? inspected.functions : null,
 			};
 			const results = await runSuite(sep41Suite, ctx);

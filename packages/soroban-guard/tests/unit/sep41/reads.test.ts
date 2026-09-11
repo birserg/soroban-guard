@@ -37,6 +37,7 @@ function stubServer(response: rpc.Api.SimulateTransactionResponse): rpc.Server {
 function ctxWith(
 	server: rpc.Server,
 	specFunctions: readonly string[] | null = null,
+	ownerIsThrowaway = false,
 ): Sep41Context {
 	const owner = Keypair.random().publicKey();
 	const spender = Keypair.random().publicKey();
@@ -47,6 +48,7 @@ function ctxWith(
 		networkPassphrase: Networks.TESTNET,
 		owner,
 		spender,
+		ownerIsThrowaway,
 		specFunctions,
 	};
 }
@@ -74,6 +76,17 @@ describe("decimalsCheck", () => {
 	it("fails a trap with the diagnostic preserved", async () => {
 		const result = await decimalsCheck.run(
 			ctxWith(stubServer(errorResponse("host invocation trapped"))),
+		);
+		expect(result.status).toBe("FAIL");
+		expect(result.evidence.error).toBe("host invocation trapped");
+	});
+
+	it("still fails a trap on a generated probe", async () => {
+		// Narrowness lock: no-standing UNVERIFIABLE applies to balance and
+		// allowance only. A decimals trap is genuine contract behavior even
+		// when the probe is throwaway, so it stays FAIL.
+		const result = await decimalsCheck.run(
+			ctxWith(stubServer(errorResponse("host invocation trapped")), null, true),
 		);
 		expect(result.status).toBe("FAIL");
 		expect(result.evidence.error).toBe("host invocation trapped");
@@ -127,6 +140,37 @@ describe("balanceCheck", () => {
 		);
 		expect(result.status).toBe("FAIL");
 	});
+
+	it("reports UNVERIFIABLE for zero on a generated probe", async () => {
+		const server = stubServer(okResponse(0n));
+		const result = await balanceCheck.run(ctxWith(server, null, true));
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("OWNER_ADDRESS");
+	});
+
+	it("passes zero for a configured owner", async () => {
+		const result = await balanceCheck.run(
+			ctxWith(stubServer(okResponse(0n)), null, false),
+		);
+		expect(result.status).toBe("PASS");
+		expect(result.actual).toBe("balance is 0");
+	});
+
+	it("reports UNVERIFIABLE for a trap on a generated probe", async () => {
+		const server = stubServer(errorResponse("trustline entry is missing"));
+		const result = await balanceCheck.run(ctxWith(server, null, true));
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("without standing");
+		expect(result.evidence.error).toBe("trustline entry is missing");
+	});
+
+	it("fails a trap on a configured owner", async () => {
+		const result = await balanceCheck.run(
+			ctxWith(stubServer(errorResponse("trustline entry is missing"))),
+		);
+		expect(result.status).toBe("FAIL");
+		expect(result.evidence.error).toBe("trustline entry is missing");
+	});
 });
 
 describe("allowanceCheck", () => {
@@ -144,6 +188,21 @@ describe("allowanceCheck", () => {
 		);
 		expect(result.status).toBe("FAIL");
 		expect(result.evidence.error).toBe("no allowance entry");
+	});
+
+	it("reports UNVERIFIABLE for zero on a generated probe", async () => {
+		const server = stubServer(okResponse(0n));
+		const result = await allowanceCheck.run(ctxWith(server, null, true));
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("OWNER_ADDRESS");
+	});
+
+	it("reports UNVERIFIABLE for a trap on a generated probe", async () => {
+		const server = stubServer(errorResponse("trustline entry is missing"));
+		const result = await allowanceCheck.run(ctxWith(server, null, true));
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("without standing");
+		expect(result.evidence.error).toBe("trustline entry is missing");
 	});
 });
 

@@ -24,22 +24,32 @@ export function specFunctionNames(spec: contract.Spec): readonly string[] {
 }
 
 /**
- * The SDK reports absent ledger entries as `{code: 404}` objects, with
- * "Could not obtain contract …" messages as backstop for code-less shapes.
- * Both halves are scoped to the SDK's own absence vocabulary from the
- * exactly-pinned version (all three instance-fetch rejects carry code
- * 404) — a generic /not found/i would also match unrelated ledger misses.
- * Anything else (TypeError, 429/500 carriers) is a transport problem and
- * propagates untouched.
+ * Numeric SDK error code when the rejection carries one (number or numeric
+ * string), else null. Centralizes the shape-read so missing-detection and
+ * ref-resolution never re-derive it ad hoc. Scoped to the SDK's own
+ * absence vocabulary from the exactly-pinned version (all three
+ * instance-fetch rejects carry code 404) — a generic /not found/i would
+ * also match unrelated ledger misses.
  */
+function getErrorCode(error: unknown): number | null {
+	if (typeof error !== "object" || error === null) return null;
+	const code = (error as { code?: unknown }).code;
+	if (typeof code === "number") return code;
+	if (typeof code === "string" && code.trim() !== "") {
+		const parsed = Number(code);
+		return Number.isInteger(parsed) ? parsed : null;
+	}
+	return null;
+}
+
 function isNotFound(error: unknown): boolean {
 	if (typeof error !== "object" || error === null) {
 		return false;
 	}
-	const record = error as Record<string, unknown>;
-	if (record.code === 404) {
+	if (getErrorCode(error) === 404) {
 		return true;
 	}
+	const record = error as Record<string, unknown>;
 	return (
 		typeof record.message === "string" &&
 		/could not obtain contract (instance|wasm)/i.test(record.message)
@@ -90,10 +100,14 @@ export async function inspectContract(
 				functions: specFunctionNames(contract.Spec.fromWasm(wasm)),
 			};
 		} catch (error) {
-			if (error instanceof TypeError) {
-				throw error;
+			// Mirror the WASM branch, plus malformed-ref setup ({code:400}:
+			// the ref names something unresolvable): both are ledger states
+			// that degrade to native. Only transport failures propagate —
+			// a wrong turn here loses an optimization, never a verdict.
+			if (isNotFound(error) || getErrorCode(error) === 400) {
+				return { kind: "native" };
 			}
-			return { kind: "native" };
+			throw error;
 		}
 	}
 	if (executable?.type !== "contractExecutableWasm") {

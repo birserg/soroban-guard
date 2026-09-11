@@ -1,4 +1,4 @@
-import { Keypair, type rpc, xdr } from "@stellar/stellar-sdk";
+import { Account, Keypair, type rpc, xdr } from "@stellar/stellar-sdk";
 
 export interface FundOptions {
 	/** getAccount verification attempts after requesting (default 10). */
@@ -99,7 +99,7 @@ export async function fundAccount(
 	if (await accountExists(server, publicKey)) {
 		return;
 	}
-	await server.requestAirdrop(publicKey);
+	await server.fundAddress(publicKey);
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		// Transport failures propagate immediately: mid-poll outages are
 		// harness errors, not evidence of absence. Only a confirmed miss
@@ -115,4 +115,29 @@ export async function fundAccount(
 		`funding not visible for ${publicKey} after ${attempts} verification checks ` +
 			`(faucet accepted the request but the account never appeared — slow ledger close or a dropped request, retrying usually succeeds)`,
 	);
+}
+
+/**
+ * Load the sequence source for simulation from the ledger entry directly.
+ * Unlike `getAccount` — whose catch-all normalizes every failure into
+ * "Account not found" — errors here keep their identity: absence throws
+ * the entry error, outages throw transport errors. Callers that already
+ * proved existence (e.g. right after funding) get an honest diagnostic
+ * instead of a misdiagnosis.
+ */
+export async function loadSourceAccount(
+	server: rpc.Server,
+	publicKey: string,
+): Promise<Account> {
+	const entry = await server.getLedgerEntry(accountLedgerKey(publicKey));
+	if (entry.val?.type !== "account") {
+		throw new Error(
+			`expected account entry for ${publicKey}, found ${String(entry.val?.type)}`,
+		);
+	}
+	const seqNum = entry.val.account.seqNum;
+	if (typeof seqNum !== "bigint") {
+		throw new Error(`account entry for ${publicKey} has no sequence number`);
+	}
+	return new Account(publicKey, seqNum.toString());
 }
