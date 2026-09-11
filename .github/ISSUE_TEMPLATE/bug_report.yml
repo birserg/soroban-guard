@@ -1,0 +1,33 @@
+name: Bug report
+description: The guard reported something wrong, or crashed
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: contract
+    attributes:
+      label: Contract ID
+      description: The C... address that was checked
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: What you ran (redact nothing — there are no secrets in CLI args)
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full terminal output
+      description: Paste everything, including the summary lines
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and why?
+    validations:
+      required: true

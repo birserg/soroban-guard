@@ -1,0 +1,3 @@
+# Default fallback: everything requests review from the maintainer.
+# Patterns are evaluated top-down, first match wins.
+* @birserg

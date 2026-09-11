@@ -1,10 +1,10 @@
 {
 	"name": "soroban-guard-monorepo",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"description": "Conformance testing for deployed SEP-41 Soroban token contracts",
 	"license": "Apache-2.0",
-	"author": "birserg",
+	"author": "Sergei Birtanov <arigatosf@gmail.com> (https://github.com/birserg)",
 	"type": "module",
 	"scripts": {
 		"typecheck": "pnpm -r typecheck",
