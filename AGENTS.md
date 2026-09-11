@@ -54,6 +54,31 @@ then re-verify with `check:ci`. Never commit with red checks.
 No behavior change commits without (1). Greens without (1) are necessary,
 never sufficient.
 
+## Review protocol (stop conditions)
+
+Reviews chase moving targets forever — five rounds here caught real bugs
+because the batch kept growing between rounds, not because review is
+bottomless. Stop conditions:
+
+1. Spec first: half a page of intended behavior (statuses, exits, edge
+   semantics) before code. Most late-round findings were unspecified
+   behavior, not broken code.
+2. Freeze the batch: new ideas found during review go to issues, never
+   into the batch under review. Scope creep between rounds is what
+   manufactures round N+1.
+3. One adversarial pass over the frozen diff, severity-triaged
+   (Critical/High/Medium/Low).
+4. Fix, re-verify (greens + live matrix), second pass covers the fix
+   diff ONLY — never a full re-scan.
+5. Ship when: zero open High/Critical; Mediums fixed or filed as tracked
+   issues with rationale; Lows to backlog without discussion.
+6. Self-injected defects are the dominant failure mode (wrong anchors,
+   eaten lines, tests asserting the new bug): the fix diff gets the same
+   read-before/after discipline as feature code.
+
+Stop = open_critical == 0 AND open_high == 0 AND artifact_frozen.
+Never a round count: counts ship bugs or waste rounds depending on luck.
+
 ## Editing discipline
 
 * Read a file (or region) before editing it. After editing, re-read the
