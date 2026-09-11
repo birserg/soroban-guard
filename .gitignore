@@ -10,3 +10,6 @@ dist/
 .env.*
 !.env.example
 *.key
+
+# Local probe scripts (one-off contract probes, never committed)
+*.tmp.ts

@@ -1,3 +1,13 @@
+/**
+ * Turning results into the two things a caller acts on: text for a human,
+ * and an exit code for a machine. Both are pure functions over
+ * `CheckResult[]` — nothing here prints, writes, or exits, so the CLI owns
+ * every side effect and both are testable without a terminal.
+ *
+ * The exit code is the load-bearing half. It is tri-state on purpose: a run
+ * that could not reach the network must not be indistinguishable from a
+ * contract that violated the spec.
+ */
 import type { CheckLayer, CheckResult, CheckStatus } from "./types.ts";
 
 export interface ReportInput {

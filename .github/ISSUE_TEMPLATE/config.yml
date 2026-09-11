@@ -1,0 +1,9 @@
+# Blank issues are disabled so every report starts from a template. The
+# templates and the link below route vulnerabilities to private advisories;
+# a blank issue is the one path that bypasses that and publishes a finding
+# before it can be fixed.
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: https://github.com/birserg/soroban-guard/security/advisories/new
+    about: Do NOT open public issues for vulnerabilities. See SECURITY.md.

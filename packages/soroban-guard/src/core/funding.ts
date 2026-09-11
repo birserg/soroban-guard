@@ -1,3 +1,17 @@
+/**
+ * Testnet account provisioning: Friendbot funding, and loading a sequence
+ * source without losing the reason a load failed.
+ *
+ * Funding exists so the tool needs no configuration — probe accounts are
+ * generated per run and funded here, rather than demanded from the user.
+ * Every rule in this file protects the faucet or the diagnosis: check
+ * before funding, fund at most once, poll because acceptance is not
+ * application, and never convert a transport failure into "absent".
+ *
+ * XLM only. Token balances and trustlines are the caller's problem — a
+ * funded account can still hold nothing of the token under test, which is
+ * why probe reads report UNVERIFIABLE rather than a vacuous PASS.
+ */
 import { Account, Keypair, type rpc, xdr } from "@stellar/stellar-sdk";
 
 export interface FundOptions {
@@ -46,6 +60,21 @@ function accountLedgerKey(publicKey: string): xdr.LedgerKey {
  * absence signal (see its source), never produced for transport problems.
  * Plain-object rejects in other shapes are treated as unknown failures,
  * not absence: only the verified message counts.
+ *
+ * Verified against SDK 17.0.1 on testnet — an absent account rejects with:
+ *
+ *     instanceof Error : true
+ *     message          : "failed to find an entry for key …"
+ *     code             : undefined
+ *
+ * Note this differs from `getContractInstance`, which rejects with a plain
+ * object carrying `code: 404` and no Error prototype (see spec.ts's
+ * `isNotFound`). Absence has no single shape across the SDK, so each call
+ * site matches the shape its own method produces rather than sharing a
+ * predicate. If SDF rewords the message the unmatched error is rethrown,
+ * so funding fails loudly until the matcher is updated — it never reads an
+ * absent account as present. `funding.live.test.ts` catches the rewording
+ * on the next run against testnet.
  */
 async function accountExists(
 	server: rpc.Server,
@@ -130,9 +159,15 @@ export async function loadSourceAccount(
 	publicKey: string,
 ): Promise<Account> {
 	const entry = await server.getLedgerEntry(accountLedgerKey(publicKey));
-	if (entry.val?.type !== "account") {
+	// `val` is non-optional in LedgerEntryResult and getLedgerEntry either
+	// resolves with one or throws, so it is read directly rather than with
+	// `?.` — a guard against a state the type forbids only makes readers
+	// wonder what it knows that they do not. The discriminant check below
+	// is real: an account key could in principle answer with another entry
+	// type, and that deserves a clear error rather than a cast.
+	if (entry.val.type !== "account") {
 		throw new Error(
-			`expected account entry for ${publicKey}, found ${String(entry.val?.type)}`,
+			`expected account entry for ${publicKey}, found ${String(entry.val.type)}`,
 		);
 	}
 	const seqNum = entry.val.account.seqNum;
