@@ -1,0 +1,41 @@
+name: Bug report
+description: The guard reported something wrong, or crashed
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: contract
+    attributes:
+      label: Contract ID
+      description: The C... address that was checked
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: >-
+        What you ran. This becomes a public issue: redact every credential
+        it contains — API keys or tokens embedded in an RPC URL above all,
+        since that is the one place this CLI accepts one. Keep contract IDs
+        and addresses; they are public and we need them to reproduce.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full terminal output
+      description: >-
+        Paste everything, including the summary lines. Redact any credential
+        or secret that appears — keys, tokens, anything in an RPC URL. Leave
+        contract IDs, addresses and diagnostics intact; they carry the
+        evidence.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and why?
+    validations:
+      required: true

@@ -1,3 +1,12 @@
+/**
+ * The SEP-41 standard's entry point: which members the spec requires, which
+ * of them this suite currently assesses, and the bridge between the two.
+ *
+ * Coverage is a first-class concern here, not an afterthought. A suite that
+ * passes every check it happens to own would otherwise report "conformant"
+ * for a token whose transfer was never examined — so unassessed members
+ * become explicit UNVERIFIABLE rows, and the exit code follows.
+ */
 import type { CheckResult, Suite } from "../core/types.ts";
 import {
 	allowanceCheck,

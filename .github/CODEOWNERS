@@ -1,0 +1,4 @@
+# Default fallback: everything requests review from the maintainer.
+# The LAST matching pattern wins, so this catch-all stays at the top and
+# any narrower rule goes below it to take precedence.
+* @birserg

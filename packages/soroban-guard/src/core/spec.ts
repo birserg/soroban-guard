@@ -76,6 +76,11 @@ export async function inspectContract(
 		}
 		throw error;
 	}
+	// Reached only after a resolved call: an absent contract rejects here
+	// (verified on testnet — a plain object with `code: 404`, not an Error)
+	// and is returned as `missing` above, so `instance` is never nullish at
+	// this point. `executable` keeps its optional read because the field is
+	// genuinely optional on the instance type.
 	const executable = instance.executable;
 	if (executable?.type === "contractExecutableExternalRef") {
 		// CAP-85: resolve the named hash through the SDK, mirroring
