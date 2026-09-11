@@ -67,12 +67,22 @@ bottomless. Stop conditions:
    into the batch under review. Scope creep between rounds is what
    manufactures round N+1.
 3. One adversarial pass over the frozen diff, severity-triaged
-   (Critical/High/Medium/Low).
-4. Fix, re-verify (greens + live matrix), second pass covers the fix
-   diff ONLY — never a full re-scan.
-5. Ship when: zero open High/Critical; Mediums fixed or filed as tracked
+   (Critical/High/Medium/Low), by a reviewer that is not the implementer
+   (see the verification hierarchy above).
+4. Triage before fixing: reproduce every finding against the source, the
+   installed SDK, or a live run. Roughly a third of findings here were
+   wrong — a version asserted not to exist that was the one installed, a
+   type-guard claim from `.d.ts` that the runtime contradicted. A wrong
+   finding costs as much as a real one, and "fixing" it adds a defect.
+   Drop what does not reproduce; say so.
+5. Fix, re-verify (greens, plus the CLI against the real-token matrix —
+   SAC and custom, funded probe and throwaway). A fix-diff read alone
+   misses wrong verdicts: the BLND false FAIL survived three rounds
+   because nobody re-ran the tool against a third-party token. The
+   second pass covers the fix diff ONLY — never a full re-scan.
+6. Ship when: zero open High/Critical; Mediums fixed or filed as tracked
    issues with rationale; Lows to backlog without discussion.
-6. Self-injected defects are the dominant failure mode (wrong anchors,
+7. Self-injected defects are the dominant failure mode (wrong anchors,
    eaten lines, tests asserting the new bug): the fix diff gets the same
    read-before/after discipline as feature code.
 
