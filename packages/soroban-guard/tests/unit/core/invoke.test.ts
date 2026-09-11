@@ -1,45 +1,23 @@
-import { Keypair, nativeToScVal, type rpc, xdr } from "@stellar/stellar-sdk";
+import { Keypair, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { addressArg, interpretSimulation } from "../../../src/core/invoke.ts";
-
-// Note: a bare JS number encodes as 64-bit (decodes to bigint), so a genuine
-// contract u32 must be built explicitly — exactly what the chain returns.
-function successResponse(retval: xdr.ScVal | unknown) {
-	const encoded =
-		typeof retval === "object" && retval !== null && "toXDR" in retval
-			? (retval as xdr.ScVal)
-			: nativeToScVal(retval);
-	return {
-		id: "unit-test",
-		latestLedger: 1,
-		events: [],
-		_parsed: true,
-		transactionData: {},
-		minResourceFee: "0",
-		result: { auth: [], retval: encoded },
-	} as unknown as rpc.Api.SimulateTransactionResponse;
-}
-
-function errorResponse(error: string): rpc.Api.SimulateTransactionResponse {
-	return {
-		id: "unit-test",
-		latestLedger: 1,
-		events: [],
-		_parsed: true,
-		error,
-	} as unknown as rpc.Api.SimulateTransactionResponse;
-}
+import {
+	answerlessSuccess,
+	errorResponse,
+	okResponse,
+	restoreResponse,
+} from "../fixtures.ts";
 
 describe("interpretSimulation", () => {
 	it("decodes a contract u32 return to a number", () => {
-		expect(interpretSimulation(successResponse(xdr.ScVal.scvU32(7)))).toEqual({
+		expect(interpretSimulation(okResponse(xdr.ScVal.scvU32(7)))).toEqual({
 			kind: "ok",
 			value: 7,
 		});
 	});
 
 	it("keeps wide ints as bigint, never number", () => {
-		const result = interpretSimulation(successResponse(900_000_000n));
+		const result = interpretSimulation(okResponse(900_000_000n));
 		expect(result.kind).toBe("ok");
 		if (result.kind === "ok") {
 			expect(typeof result.value).toBe("bigint");
@@ -53,27 +31,32 @@ describe("interpretSimulation", () => {
 		).toEqual({ kind: "trapped", diagnostics: "host invocation trapped" });
 	});
 
-	it("maps a restore preamble to restore, not trapped", () => {
-		const restore = {
-			...successResponse(7),
-			restorePreamble: { minResourceFee: "0", transactionData: {} },
-		} as unknown as rpc.Api.SimulateTransactionResponse;
-		const result = interpretSimulation(restore);
+	it("decodes a restore that carries an answer as ok", () => {
+		// Restore responses are success-shaped at runtime: the preamble only
+		// matters for submission, and reads never submit.
+		expect(interpretSimulation(restoreResponse(xdr.ScVal.scvU32(7)))).toEqual({
+			kind: "ok",
+			value: 7,
+		});
+	});
+
+	it("maps a restore without an answer to restore", () => {
+		const result = interpretSimulation(restoreResponse());
 		expect(result.kind).toBe("restore");
 	});
 
-	it("traps a success without a return value", () => {
-		const noRetval = {
-			id: "unit-test",
-			latestLedger: 1,
-			events: [],
-			_parsed: true,
-			transactionData: {},
-			minResourceFee: "0",
-			result: { auth: [] },
-		} as unknown as rpc.Api.SimulateTransactionResponse;
-		const result = interpretSimulation(noRetval);
-		expect(result.kind).toBe("trapped");
+	it("maps answerless success to inconclusive, never trapped", () => {
+		// Partial RPC data is a harness anomaly, not a contract trap.
+		// Mapping it to FAIL would accuse the contract of non-conformance.
+		const result = interpretSimulation(answerlessSuccess());
+		expect(result.kind).toBe("inconclusive");
+	});
+
+	it("decodes a void return to null", () => {
+		expect(interpretSimulation(okResponse(xdr.ScVal.scvVoid()))).toEqual({
+			kind: "ok",
+			value: null,
+		});
 	});
 });
 

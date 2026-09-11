@@ -1,5 +1,11 @@
 import type { Suite } from "../core/types.ts";
-import { allowanceCheck, balanceCheck, decimalsCheck } from "./checks/reads.ts";
+import {
+	allowanceCheck,
+	balanceCheck,
+	decimalsCheck,
+	nameCheck,
+	symbolCheck,
+} from "./checks/reads.ts";
 import type { Sep41Context } from "./context.ts";
 
 export type { Sep41Context } from "./context.ts";
@@ -10,5 +16,5 @@ export type { Sep41Context } from "./context.ts";
  */
 export const sep41Suite: Suite<Sep41Context> = {
 	standard: "SEP-41",
-	checks: [decimalsCheck, balanceCheck, allowanceCheck],
+	checks: [decimalsCheck, balanceCheck, allowanceCheck, nameCheck, symbolCheck],
 };
