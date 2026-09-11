@@ -36,9 +36,15 @@ export type CheckLayer = "interface" | "behavior" | "events";
  * Whether the clause is mandatory. SEP-41 itself has no optionality
  * language — every member of its TokenInterface trait (including decimals,
  * name, symbol, burn, burn_from) is required, so today every SEP-41 check
- * is "required". The flag exists for future standards and capability
- * disclosure; mint/clawback are not SEP-41 at all (SAC extensions), so
- * they never appear here.
+ * is "required" (the suite currently covers 3 of the 10 members; the flag
+ * describes the clause, not suite coverage). The flag exists for future
+ * standards and capability disclosure; mint/clawback are not SEP-41 at all
+ * (SAC extensions), so they never appear here.
+ *
+ * Absent-vs-broken are different verdicts: an `optional` check that is
+ * absent (NOT_IMPLEMENTED) is conformant, but an `optional` check that is
+ * present and misbehaves still FAILs — optionality excuses absence, never
+ * defects. Exit codes follow the same rule.
  */
 export type CheckRequirement = "required" | "optional";
 
@@ -59,7 +65,12 @@ export interface Evidence {
 	readonly after?: Readonly<Record<string, string>>;
 	readonly events?: readonly ObservedEvent[];
 	readonly txHash?: string;
-	/** Ledger the transaction was applied in — events age out of RPC, this does not. */
+	/**
+	 * Latest ledger known to the node at observation time for reads (no
+	 * transaction is applied), ledger of inclusion for writes. Per-check
+	 * values from a sequential run are separate observations, not one
+	 * coherent snapshot — events age out of RPC, this number does not.
+	 */
 	readonly ledger?: number;
 	/** Raw error text when a call trapped, for FAIL and for negative checks. */
 	readonly error?: string;

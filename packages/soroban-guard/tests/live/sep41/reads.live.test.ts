@@ -1,6 +1,7 @@
 import { rpc } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "../../../src/core/runner.ts";
+import { inspectContract } from "../../../src/core/spec.ts";
 import type { Sep41Context } from "../../../src/sep41/context.ts";
 import { sep41Suite } from "../../../src/sep41/index.ts";
 
@@ -15,12 +16,13 @@ const SPENDER = process.env.SPENDER_ADDRESS;
 describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 	"SEP-41 reads on testnet",
 	() => {
-		it("decimals, balance and allowance all PASS", async () => {
+		it("all five reads PASS", async () => {
 			if (!CONTRACT || !OWNER || !SPENDER) {
 				throw new Error("unreachable: env guard skipped this suite");
 			}
 			const server = new rpc.Server(RPC_URL);
 			const source = await server.getAccount(OWNER);
+			const inspected = await inspectContract(server, CONTRACT);
 			const ctx: Sep41Context = {
 				server,
 				contractId: CONTRACT,
@@ -28,9 +30,10 @@ describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 				networkPassphrase: PASSPHRASE,
 				owner: OWNER,
 				spender: SPENDER,
+				specFunctions: inspected.kind === "wasm" ? inspected.functions : null,
 			};
 			const results = await runSuite(sep41Suite, ctx);
-			expect(results).toHaveLength(3);
+			expect(results).toHaveLength(5);
 			for (const result of results) {
 				expect(
 					result.status,
