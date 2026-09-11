@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderReport } from "../../../src/core/report.ts";
+import { exitCodeFor, renderReport } from "../../../src/core/report.ts";
 import type { CheckResult } from "../../../src/core/types.ts";
 
 const CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM";
@@ -50,9 +50,14 @@ describe("renderReport", () => {
 				"",
 				"  ✓ sep41-decimals  returned 7",
 				"  ✗ sep41-balance  call trapped",
+				"    expected: non-negative balance for the holder",
+				"    error: host invocation trapped",
 				"  ○ sep41-allowance  check did not complete",
+				"    expected: stub allowance",
+				"    error: RPC down",
 				"",
-				"1 of 3 passed",
+				"1 pass, 1 fail, 1 skipped, 0 unverifiable, 0 not implemented (3 checks)",
+				"by layer: interface 1/1 pass · behavior 0/2 pass",
 			].join("\n"),
 		);
 	});
@@ -60,6 +65,56 @@ describe("renderReport", () => {
 	it("renders an empty suite without crashing", () => {
 		expect(
 			renderReport({ standard: "SEP-41", contractId: CONTRACT, results: [] }),
-		).toBe(`SEP-41 Conformance — ${CONTRACT}\n\n\n0 of 0 passed`);
+		).toBe(
+			`SEP-41 Conformance — ${CONTRACT}\n\n\n0 pass, 0 fail, 0 skipped, 0 unverifiable, 0 not implemented (0 checks)`,
+		);
+	});
+});
+
+function resultWith(
+	status: CheckResult["status"],
+	requirement: CheckResult["requirement"] = "required",
+): CheckResult {
+	return {
+		id: "stub",
+		clause: "TEST §example",
+		layer: "behavior",
+		requirement,
+		status,
+		expected: "stub",
+		actual: "stub",
+		evidence: {},
+		durationMs: 0,
+	};
+}
+
+describe("exitCodeFor", () => {
+	it("exits 0 when everything passes", () => {
+		expect(exitCodeFor([resultWith("PASS"), resultWith("PASS")])).toBe(0);
+	});
+
+	it("exits 0 for optional NOT_IMPLEMENTED", () => {
+		expect(exitCodeFor([resultWith("NOT_IMPLEMENTED", "optional")])).toBe(0);
+	});
+
+	it("exits 1 on any FAIL", () => {
+		expect(exitCodeFor([resultWith("PASS"), resultWith("FAIL")])).toBe(1);
+	});
+
+	it("exits 1 when a required check is NOT_IMPLEMENTED", () => {
+		expect(exitCodeFor([resultWith("NOT_IMPLEMENTED")])).toBe(1);
+	});
+
+	it("exits 2 when nothing ran", () => {
+		expect(exitCodeFor([])).toBe(2);
+	});
+
+	it("exits 2 on SKIPPED or UNVERIFIABLE, never 1", () => {
+		expect(exitCodeFor([resultWith("PASS"), resultWith("SKIPPED")])).toBe(2);
+		expect(exitCodeFor([resultWith("UNVERIFIABLE")])).toBe(2);
+	});
+
+	it("prefers 1 when both FAIL and SKIPPED are present", () => {
+		expect(exitCodeFor([resultWith("SKIPPED"), resultWith("FAIL")])).toBe(1);
 	});
 });
