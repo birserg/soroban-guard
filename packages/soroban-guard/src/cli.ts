@@ -1,23 +1,20 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { Keypair, rpc, StrKey } from "@stellar/stellar-sdk";
-import { fundAccount, loadSourceAccount } from "./core/funding.ts";
+import { fundAccount } from "./core/funding.ts";
 import { exitCodeFor, renderReport } from "./core/report.ts";
 import { runSuite } from "./core/runner.ts";
 import { inspectContract } from "./core/spec.ts";
 import type { Sep41Context } from "./sep41/context.ts";
-import { sep41Suite } from "./sep41/index.ts";
+import { sep41Suite, withCoverageGaps } from "./sep41/index.ts";
 
 const USAGE =
-	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http]";
-
-const DEFAULT_PASSPHRASE = "Test SDF Network ; September 2015";
+	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P]";
 
 let positionals: string[];
 let values: {
 	"rpc-url"?: string;
 	passphrase?: string;
-	"allow-http"?: boolean;
 	help?: boolean;
 };
 try {
@@ -26,7 +23,6 @@ try {
 		options: {
 			"rpc-url": { type: "string" },
 			passphrase: { type: "string" },
-			"allow-http": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 	}));
@@ -38,20 +34,13 @@ try {
 	process.exit(2);
 }
 
-const [rawContractId, ...extraPositionals] = positionals;
-// Any positional alongside --help is a usage error, not a help request:
-// `--help extra-garbage` used to slip through because only 2+
-// positionals were rejected before the help branch.
-if (extraPositionals.length > 0 || (values.help && positionals.length > 0)) {
-	console.error(USAGE);
-	process.exit(2);
-}
 if (values.help) {
 	console.log(USAGE);
 	process.exit(0);
 }
+const [rawContractId, ...extraPositionals] = positionals;
 const contractId = nonEmpty(rawContractId);
-if (!contractId) {
+if (!contractId || extraPositionals.length > 0) {
 	console.error(USAGE);
 	process.exit(2);
 }
@@ -66,15 +55,13 @@ if (!StrKey.isValidContract(contractId)) {
  * unconfigured run generates throwaway accounts rather than refusing to
  * start. Supplying the env vars points the probes at a specific holder,
  * which is what you want when asserting real balances on a token you own.
- * Only the owner is funded: the spender exists purely as a simulation
- * argument and needs no XLM.
  */
-const ownerRaw = nonEmpty(process.env.OWNER_ADDRESS);
-const owner = ownerRaw ?? Keypair.random().publicKey();
+const ownerEnv = nonEmpty(process.env.OWNER_ADDRESS);
+const owner = ownerEnv ?? Keypair.random().publicKey();
 // Remembered, not inferred: a generated probe asserting balance 0 proves
 // nothing (it passes on every token, including always-zero bugs), so the
 // balance check reports it UNVERIFIABLE instead of PASS.
-const ownerIsThrowaway = ownerRaw === undefined;
+const ownerIsThrowaway = ownerEnv === undefined;
 const spender =
 	nonEmpty(process.env.SPENDER_ADDRESS) ?? Keypair.random().publicKey();
 for (const [role, address] of [
@@ -94,46 +81,33 @@ function nonEmpty(value: string | undefined): string | undefined {
 	return trimmed ? trimmed : undefined;
 }
 
-const rpcUrl = (
+const rpcUrl =
 	nonEmpty(values["rpc-url"]) ??
 	nonEmpty(process.env.SOROBAN_RPC_URL) ??
-	"https://soroban-testnet.stellar.org"
-).replace(/\/+$/, "");
+	"https://soroban-testnet.stellar.org";
 try {
 	new URL(rpcUrl);
 } catch {
 	console.error(`invalid RPC URL: ${rpcUrl}`);
 	process.exit(2);
 }
-// The passphrase is network identity, not a free string: never trim it
-// (trimming " X " into "X" would silently switch networks), and refuse a
-// blank one instead of falling back — silent defaults hide misconfig.
-const rawPassphrase =
-	values.passphrase ?? process.env.NETWORK_PASSPHRASE ?? DEFAULT_PASSPHRASE;
-if (rawPassphrase.trim() === "") {
-	console.error("passphrase must not be blank");
-	process.exit(2);
-}
-if (rawPassphrase !== rawPassphrase.trim()) {
-	console.error("warning: passphrase has surrounding whitespace");
-}
-const networkPassphrase = rawPassphrase;
+const networkPassphrase =
+	nonEmpty(values.passphrase) ??
+	nonEmpty(process.env.NETWORK_PASSPHRASE) ??
+	"Test SDF Network ; September 2015";
 
 let server: rpc.Server;
-let source: Awaited<ReturnType<typeof loadSourceAccount>>;
+let source: Awaited<ReturnType<rpc.Server["getAccount"]>>;
 let specFunctions: readonly string[] | null;
 try {
 	// The SDK validates the transport scheme eagerly and throws outside any
 	// RPC call, so construction lives inside the guarded block too.
 	// Order inside is deliberate: inspect first, so a missing ID exits
-	// before spending faucet quota or waiting out polls; fund next, owner
-	// only — the spender exists purely as a simulation argument and needs
-	// no XLM; load last via the ledger entry, so a post-funding load
-	// failure genuinely means unreachable instead of misdiagnosing as
-	// "Account not found".
-	server = new rpc.Server(rpcUrl, {
-		allowHttp: values["allow-http"] === true,
-	});
+	// before spending faucet quota or waiting out polls; fund next
+	// (check-first: funded accounts are untouched, and funding verifies
+	// both owner and spender exist); load last, so a post-funding load
+	// failure genuinely means unreachable.
+	server = new rpc.Server(rpcUrl);
 	const inspected = await inspectContract(server, contractId);
 	if (inspected.kind === "missing") {
 		console.error(`no contract found at ${contractId}`);
@@ -144,7 +118,8 @@ try {
 	}
 	specFunctions = inspected.kind === "wasm" ? inspected.functions : null;
 	await fundAccount(server, owner);
-	source = await loadSourceAccount(server, owner);
+	await fundAccount(server, spender);
+	source = await server.getAccount(owner);
 } catch (error) {
 	console.error(
 		`cannot prepare run: ${error instanceof Error ? error.message : String(error)}`,
@@ -165,7 +140,10 @@ const ctx: Sep41Context = {
 	specFunctions,
 };
 
-const results = await runSuite(sep41Suite, ctx);
+const assessed = await runSuite(sep41Suite, ctx);
+// Unassessed members become UNVERIFIABLE rows: without this, five passing
+// checks would exit 0 while half the standard went unexamined.
+const results = withCoverageGaps(assessed);
 console.log(
 	renderReport({ standard: sep41Suite.standard, contractId, results }),
 );
