@@ -32,10 +32,8 @@ export interface ReadCall {
 export type InvokeResult =
 	| { readonly kind: "ok"; readonly value: unknown }
 	| { readonly kind: "trapped"; readonly diagnostics: string }
-	| {
-			readonly kind: "restore";
-			readonly diagnostics: string;
-	  };
+	| { readonly kind: "restore"; readonly diagnostics: string }
+	| { readonly kind: "inconclusive"; readonly diagnostics: string };
 
 /**
  * Encode a `C...`/`G...` address argument. Contract functions take ScVals,
@@ -81,32 +79,31 @@ export async function simulateRead(
  * unit-testable against captured fixtures.
  *
  * Decoding notes: integers wider than 32 bits arrive as `bigint` (i128
- * balances included) — never coerce to `number`. `restore` means archived
- * entries must be restored first; callers map it to retry/`UNVERIFIABLE`,
- * never to `FAIL`.
+ * balances included) — never coerce to `number`. A `void` return decodes to
+ * `null` (there is no other null source). Restore responses are
+ * success-shaped at runtime and carry the answer — reads decode it as `ok`
+ * because reads never submit; only a restore *without* an answer reports
+ * `restore`. Answerless success is partial RPC data, never a contract trap,
+ * so it reports `inconclusive` and callers must not FAIL on it.
  */
 export function interpretSimulation(
 	sim: rpc.Api.SimulateTransactionResponse,
 ): InvokeResult {
+	if (rpc.Api.isSimulationError(sim)) {
+		return { kind: "trapped", diagnostics: sim.error };
+	}
+	if (rpc.Api.isSimulationSuccess(sim) && sim.result?.retval !== undefined) {
+		return { kind: "ok", value: scValToNative(sim.result.retval) };
+	}
 	if (rpc.Api.isSimulationRestore(sim)) {
 		return {
 			kind: "restore",
 			diagnostics:
-				"ledger entries need restoration before this call can execute",
+				"no answer and archived entries need restoration before this call can execute",
 		};
 	}
-	if (rpc.Api.isSimulationError(sim)) {
-		return { kind: "trapped", diagnostics: sim.error };
-	}
-	if (rpc.Api.isSimulationSuccess(sim)) {
-		const retval = sim.result?.retval;
-		if (retval === undefined) {
-			return {
-				kind: "trapped",
-				diagnostics: "simulation succeeded without a return value",
-			};
-		}
-		return { kind: "ok", value: scValToNative(retval) };
-	}
-	return { kind: "trapped", diagnostics: "unrecognized simulation response" };
+	return {
+		kind: "inconclusive",
+		diagnostics: "simulation succeeded without a return value",
+	};
 }

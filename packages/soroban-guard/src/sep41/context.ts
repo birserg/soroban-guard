@@ -9,6 +9,11 @@ import type { Account, rpc } from "@stellar/stellar-sdk";
  * carry a trustline on SAC tokens): the owner holds the balance and grants
  * allowances, the spender receives them. Roles, not identities — which
  * account plays each role is decided by the caller.
+ *
+ * `specFunctions` is the contract's declared function list when determinable
+ * (WASM tokens), fetched once per run. `null` means undeterminable (SAC has
+ * no spec to read) — checks proceed to simulation as if everything exists,
+ * and a trap is judged on its own terms.
  */
 export interface Sep41Context {
 	readonly server: rpc.Server;
@@ -17,4 +22,5 @@ export interface Sep41Context {
 	readonly networkPassphrase: string;
 	readonly owner: string;
 	readonly spender: string;
+	readonly specFunctions: readonly string[] | null;
 }
