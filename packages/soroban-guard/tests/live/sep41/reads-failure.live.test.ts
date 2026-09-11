@@ -37,6 +37,7 @@ describe.skipIf(!(OWNER && SPENDER))("SEP-41 reads against nothing", () => {
 			networkPassphrase: PASSPHRASE,
 			owner: OWNER,
 			spender: SPENDER,
+			ownerIsThrowaway: false,
 			specFunctions: null,
 		};
 		const results = await runSuite(sep41Suite, ctx);

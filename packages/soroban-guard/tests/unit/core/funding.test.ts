@@ -1,24 +1,24 @@
 import type { rpc } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
-import { fundAccount } from "../../../src/core/funding.ts";
+import { fundAccount, loadSourceAccount } from "../../../src/core/funding.ts";
 
 const KEY = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 const ABSENT = new Error("failed to find an entry for key ABCD");
 
 function stubServer(impl: {
 	getLedgerEntry?: () => Promise<unknown>;
-	requestAirdrop?: () => Promise<unknown>;
+	fundAddress?: () => Promise<unknown>;
 }): rpc.Server & {
 	getLedgerEntry: ReturnType<typeof vi.fn>;
-	requestAirdrop: ReturnType<typeof vi.fn>;
+	fundAddress: ReturnType<typeof vi.fn>;
 } {
 	return {
 		getLedgerEntry: vi.fn(async () => ({})),
-		requestAirdrop: vi.fn(async () => {}),
+		fundAddress: vi.fn(async () => {}),
 		...impl,
 	} as unknown as rpc.Server & {
 		getLedgerEntry: ReturnType<typeof vi.fn>;
-		requestAirdrop: ReturnType<typeof vi.fn>;
+		fundAddress: ReturnType<typeof vi.fn>;
 	};
 }
 
@@ -27,7 +27,7 @@ describe("fundAccount", () => {
 		const server = stubServer({});
 		await fundAccount(server, KEY, { delayMs: 0 });
 		expect(server.getLedgerEntry).toHaveBeenCalledTimes(1);
-		expect(server.requestAirdrop).not.toHaveBeenCalled();
+		expect(server.fundAddress).not.toHaveBeenCalled();
 	});
 
 	it("requests once, then verifies", async () => {
@@ -42,8 +42,8 @@ describe("fundAccount", () => {
 			}),
 		});
 		await fundAccount(server, KEY, { delayMs: 0 });
-		expect(server.requestAirdrop).toHaveBeenCalledTimes(1);
-		expect(server.requestAirdrop).toHaveBeenCalledWith(KEY);
+		expect(server.fundAddress).toHaveBeenCalledTimes(1);
+		expect(server.fundAddress).toHaveBeenCalledWith(KEY);
 	});
 
 	it("throws after exhausting verification attempts", async () => {
@@ -57,7 +57,7 @@ describe("fundAccount", () => {
 		).rejects.toThrow(KEY);
 		// Initial check + one verification per attempt.
 		expect(server.getLedgerEntry).toHaveBeenCalledTimes(4);
-		expect(server.requestAirdrop).toHaveBeenCalledTimes(1);
+		expect(server.fundAddress).toHaveBeenCalledTimes(1);
 	});
 
 	it("never sleeps after the final poll", async () => {
@@ -84,7 +84,7 @@ describe("fundAccount", () => {
 			getLedgerEntry: vi.fn(async () => {
 				throw ABSENT;
 			}),
-			requestAirdrop: vi.fn(async () => {
+			fundAddress: vi.fn(async () => {
 				throw new Error("rate limited");
 			}),
 		});
@@ -103,7 +103,7 @@ describe("fundAccount", () => {
 		await expect(fundAccount(server, KEY, { delayMs: 0 })).rejects.toThrow(
 			"fetch failed",
 		);
-		expect(server.requestAirdrop).not.toHaveBeenCalled();
+		expect(server.fundAddress).not.toHaveBeenCalled();
 	});
 
 	it("propagates mid-poll transport errors without further sleeps", async () => {
@@ -135,7 +135,7 @@ describe("fundAccount", () => {
 			fundAccount(server, KEY, { attempts: 0, delayMs: 0 }),
 		).rejects.toThrow(RangeError);
 		expect(server.getLedgerEntry).not.toHaveBeenCalled();
-		expect(server.requestAirdrop).not.toHaveBeenCalled();
+		expect(server.fundAddress).not.toHaveBeenCalled();
 	});
 
 	it("rejects bad delays before any network call", async () => {
@@ -146,7 +146,7 @@ describe("fundAccount", () => {
 			);
 		}
 		expect(server.getLedgerEntry).not.toHaveBeenCalled();
-		expect(server.requestAirdrop).not.toHaveBeenCalled();
+		expect(server.fundAddress).not.toHaveBeenCalled();
 	});
 
 	it("rejects malformed keys before any network call", async () => {
@@ -155,6 +155,47 @@ describe("fundAccount", () => {
 			fundAccount(server, "NOT_A_KEY", { delayMs: 0 }),
 		).rejects.toThrow(RangeError);
 		expect(server.getLedgerEntry).not.toHaveBeenCalled();
-		expect(server.requestAirdrop).not.toHaveBeenCalled();
+		expect(server.fundAddress).not.toHaveBeenCalled();
+	});
+});
+
+describe("loadSourceAccount", () => {
+	it("builds the sequence source from the ledger entry", async () => {
+		const server = stubServer({
+			getLedgerEntry: vi.fn(async () => ({
+				val: { type: "account", account: { seqNum: 42n } },
+			})),
+		});
+		const account = await loadSourceAccount(server, KEY);
+		expect(account.accountId()).toBe(KEY);
+		expect(account.sequenceNumber()).toBe("42");
+	});
+
+	it("propagates absence and transport errors unconverted", async () => {
+		const absent = stubServer({
+			getLedgerEntry: vi.fn(async () => {
+				throw new Error("failed to find an entry for key ABCD");
+			}),
+		});
+		await expect(loadSourceAccount(absent, KEY)).rejects.toThrow(
+			"failed to find an entry",
+		);
+		const down = stubServer({
+			getLedgerEntry: vi.fn(async () => {
+				throw new TypeError("fetch failed");
+			}),
+		});
+		await expect(loadSourceAccount(down, KEY)).rejects.toThrow("fetch failed");
+	});
+
+	it("names the unexpected type instead of claiming absence", async () => {
+		const wrongType = stubServer({
+			getLedgerEntry: vi.fn(async () => ({
+				val: { type: "trustline" },
+			})),
+		});
+		await expect(loadSourceAccount(wrongType, KEY)).rejects.toThrow(
+			"expected account entry",
+		);
 	});
 });

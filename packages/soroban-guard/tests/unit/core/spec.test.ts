@@ -171,6 +171,26 @@ describe("inspectContract", () => {
 		).resolves.toEqual({ kind: "native" });
 	});
 
+	it("falls back to native on malformed external refs", async () => {
+		const server = {
+			getContractInstance: async () => ({
+				executable: {
+					type: "contractExecutableExternalRef",
+					externalRef: {},
+				},
+			}),
+			getExternalRefWasmHash: async () => {
+				throw { code: 400 };
+			},
+		} as unknown as rpc.Server;
+		await expect(
+			inspectContract(
+				server,
+				"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+			),
+		).resolves.toEqual({ kind: "native" });
+	});
+
 	it("propagates transport failures from external-ref resolution", async () => {
 		const server = {
 			getContractInstance: async () => ({

@@ -145,6 +145,33 @@ function notImplemented(
 function isDeclared(ctx: Sep41Context, method: string): boolean {
 	return ctx.specFunctions === null || ctx.specFunctions.includes(method);
 }
+
+/**
+ * No-standing short-circuit: a throwaway probe has no trustline, no
+ * history, nothing — a trap against it proves nothing about the contract,
+ * because the call never had standing to succeed (e.g. SAC's
+ * "trustline entry is missing"). Narrow by construction: only the
+ * address-dependent reads (balance, allowance) call this, and only when
+ * ctx.ownerIsThrowaway. A trap on a supplied address, or on
+ * decimals/name/symbol, stays FAIL.
+ */
+function noStandingTrap(
+	meta: CheckMeta,
+	expected: string,
+	ledger: number,
+	diagnostics: string,
+	durationMs: number,
+): CheckResult {
+	return {
+		...meta,
+		status: "UNVERIFIABLE",
+		expected,
+		actual:
+			"call trapped without standing; set OWNER_ADDRESS for a real assertion",
+		evidence: { ledger, error: diagnostics },
+		durationMs,
+	};
+}
 // Sanity bound, not spec: SEP-41 puts no maximum on decimals. Anything
 // above this almost certainly indicates a decode error rather than a real
 // token (Stellar assets use 7 or fewer) — so out-of-range routes to
@@ -216,15 +243,33 @@ export const balanceCheck: Check<Sep41Context> = {
 			method: "balance",
 			args: [addressArg(ctx.owner)],
 		});
+		if (outcome.kind === "trapped" && ctx.ownerIsThrowaway) {
+			return noStandingTrap(
+				balanceMeta,
+				"non-negative balance for the holder",
+				simLatestLedger,
+				outcome.diagnostics,
+				durationMs,
+			);
+		}
 		return mapReadOutcome(
 			balanceMeta,
 			"non-negative balance for the holder",
 			simLatestLedger,
 			outcome,
-			(value) =>
-				typeof value === "bigint" && value >= 0n
-					? { verdict: "pass", actual: `balance is ${value}` }
-					: null,
+			(value) => {
+				if (typeof value !== "bigint" || value < 0n) {
+					return null;
+				}
+				if (value === 0n && ctx.ownerIsThrowaway) {
+					return {
+						verdict: "unverifiable",
+						actual:
+							"balance is 0 on a generated probe address; set OWNER_ADDRESS for a real assertion",
+					} as const;
+				}
+				return { verdict: "pass", actual: `balance is ${value}` } as const;
+			},
 			durationMs,
 		);
 	},
@@ -250,15 +295,33 @@ export const allowanceCheck: Check<Sep41Context> = {
 			method: "allowance",
 			args: [addressArg(ctx.owner), addressArg(ctx.spender)],
 		});
+		if (outcome.kind === "trapped" && ctx.ownerIsThrowaway) {
+			return noStandingTrap(
+				allowanceMeta,
+				"non-negative allowance from owner to spender",
+				simLatestLedger,
+				outcome.diagnostics,
+				durationMs,
+			);
+		}
 		return mapReadOutcome(
 			allowanceMeta,
 			"non-negative allowance from owner to spender",
 			simLatestLedger,
 			outcome,
-			(value) =>
-				typeof value === "bigint" && value >= 0n
-					? { verdict: "pass", actual: `allowance is ${value}` }
-					: null,
+			(value) => {
+				if (typeof value !== "bigint" || value < 0n) {
+					return null;
+				}
+				if (value === 0n && ctx.ownerIsThrowaway) {
+					return {
+						verdict: "unverifiable",
+						actual:
+							"allowance is 0 on a generated probe address; set OWNER_ADDRESS for a real assertion",
+					} as const;
+				}
+				return { verdict: "pass", actual: `allowance is ${value}` } as const;
+			},
 			durationMs,
 		);
 	},
