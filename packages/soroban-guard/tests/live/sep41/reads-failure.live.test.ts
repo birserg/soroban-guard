@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { runSuite } from "../../../src/core/runner.ts";
 import { inspectContract } from "../../../src/core/spec.ts";
 import type { Sep41Context } from "../../../src/sep41/context.ts";
-import { sep41Suite } from "../../../src/sep41/index.ts";
+import { sep41Suite, withCoverageGaps } from "../../../src/sep41/index.ts";
 
 const RPC_URL =
 	process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -40,11 +40,15 @@ describe.skipIf(!(OWNER && SPENDER))("SEP-41 reads against nothing", () => {
 			ownerIsThrowaway: false,
 			specFunctions: null,
 		};
-		const results = await runSuite(sep41Suite, ctx);
-		expect(results).toHaveLength(5);
-		for (const result of results) {
-			expect(result.status).toBe("FAIL");
-			expect(result.evidence.error).toBeDefined();
+		const assessed = await runSuite(sep41Suite, ctx);
+		const results = withCoverageGaps(assessed);
+		expect(results).toHaveLength(10);
+		for (const result of results.slice(0, 5)) {
+			expect(result?.status).toBe("FAIL");
+			expect(result?.evidence.error).toBeDefined();
+		}
+		for (const result of results.slice(5)) {
+			expect(result?.status).toBe("UNVERIFIABLE");
 		}
 	}, 60_000);
 });

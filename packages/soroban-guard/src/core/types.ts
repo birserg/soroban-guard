@@ -36,7 +36,7 @@ export type CheckLayer = "interface" | "behavior" | "events";
  * Whether the clause is mandatory. SEP-41 itself has no optionality
  * language — every member of its TokenInterface trait (including decimals,
  * name, symbol, burn, burn_from) is required, so today every SEP-41 check
- * is "required" (the suite currently covers 3 of the 10 members; the flag
+ * is "required" (the suite currently covers 5 of the 10 members; the flag
  * describes the clause, not suite coverage). The flag exists for future
  * standards and capability disclosure; mint/clawback are not SEP-41 at all
  * (SAC extensions), so they never appear here.

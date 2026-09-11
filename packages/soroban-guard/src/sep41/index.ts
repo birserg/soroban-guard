@@ -1,4 +1,4 @@
-import type { Suite } from "../core/types.ts";
+import type { CheckResult, Suite } from "../core/types.ts";
 import {
 	allowanceCheck,
 	balanceCheck,
@@ -9,6 +9,64 @@ import {
 import type { Sep41Context } from "./context.ts";
 
 export type { Sep41Context } from "./context.ts";
+
+/**
+ * The ten required SEP-41 token-interface members. The suite may cover a
+ * subset; anything uncovered is a gap in our knowledge, not a contract
+ * verdict — see withCoverageGaps.
+ */
+export const SEP41_MEMBERS: readonly string[] = [
+	"allowance",
+	"approve",
+	"balance",
+	"burn",
+	"burn_from",
+	"decimals",
+	"name",
+	"symbol",
+	"transfer",
+	"transfer_from",
+];
+
+/**
+ * The suite's check for a member, if any. Convention: check ids are
+ * `sep41-<member>`; pinned by unit test so a renamed id fails loudly
+ * instead of silently opening a phantom gap row.
+ */
+function memberOf(resultId: string): string | null {
+	return resultId.startsWith("sep41-") ? resultId.slice("sep41-".length) : null;
+}
+
+/**
+ * Append UNVERIFIABLE rows for required members no check assessed, so the
+ * report shows the gap and the exit code reflects it. Without this, five
+ * passing checks would exit 0 — "verified conformant" — while transfer,
+ * approve and friends were never assessed at all.
+ */
+export function withCoverageGaps(
+	results: readonly CheckResult[],
+): CheckResult[] {
+	const covered = new Set(
+		results
+			.map((result) => memberOf(result.id))
+			.filter((member): member is string => member !== null),
+	);
+	const gaps = SEP41_MEMBERS.filter((member) => !covered.has(member)).map(
+		(member): CheckResult => ({
+			id: `sep41-${member}`,
+			clause: `SEP-41 §${member}`,
+			// Shallowest claim: nothing was observed, not even the interface.
+			layer: "interface",
+			requirement: "required",
+			status: "UNVERIFIABLE",
+			expected: `${member}() is assessed by the suite`,
+			actual: "not assessed by this suite",
+			evidence: {},
+			durationMs: 0,
+		}),
+	);
+	return [...results, ...gaps];
+}
 
 /**
  * The SEP-41 suite. This object is the only thing core ever sees — the
