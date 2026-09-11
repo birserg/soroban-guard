@@ -11,14 +11,25 @@ import type { Sep41Context } from "../context.ts";
 type CheckMeta = Pick<CheckResult, "id" | "clause" | "layer" | "requirement">;
 
 /**
+ * What a value assertion can conclude. `pass`/`null` are PASS/FAIL;
+ * `unverifiable` is for spec-legal but insane values (e.g. decimals far
+ * outside any plausible bound) — accusing the contract would be false, and
+ * passing would bless a likely decode problem.
+ */
+type AcceptResult =
+	| { readonly verdict: "pass"; readonly actual: string }
+	| { readonly verdict: "unverifiable"; readonly actual: string }
+	| null;
+
+/**
  * Shared outcome mapping for read-only checks. A trap is FAIL data (never
- * an exception); a restore is UNVERIFIABLE (the call never executed, so the
- * contract is not implicated); otherwise `accept` decides what a sane value
- * looks like and phrases it, or returns null to FAIL.
+ * an exception). Restore and inconclusive both mean the call never produced
+ * an answer, so both are UNVERIFIABLE with different explanations — never
+ * FAIL. Otherwise `accept` decides what a sane value looks like.
  *
- * TODO: distinguish missing-function → NOT_IMPLEMENTED via contract-spec
- * introspection (fetch the code entry, parse the spec for the function
- * name). Do NOT sniff the trap diagnostic string — that couples us to
+ * Missing functions never reach here: isDeclared() short-circuits them to
+ * NOT_IMPLEMENTED from ctx.specFunctions before any simulation. Do NOT
+ * sniff trap diagnostics for absence — that couples us to
  * RPC-version-specific error text.
  */
 function mapReadOutcome(
@@ -26,15 +37,18 @@ function mapReadOutcome(
 	expected: string,
 	ledger: number,
 	outcome: InvokeResult,
-	accept: (value: unknown) => string | null,
+	accept: (value: unknown) => AcceptResult,
 	durationMs: number,
 ): CheckResult {
-	if (outcome.kind === "restore") {
+	if (outcome.kind === "restore" || outcome.kind === "inconclusive") {
 		return {
 			...meta,
 			status: "UNVERIFIABLE",
 			expected,
-			actual: "call needs restoration; not executed",
+			actual:
+				outcome.kind === "restore"
+					? "call needs restoration; not executed"
+					: "no return value observed; not executed",
 			evidence: { ledger, error: outcome.diagnostics },
 			durationMs,
 		};
@@ -49,13 +63,23 @@ function mapReadOutcome(
 			durationMs,
 		};
 	}
-	const actual = accept(outcome.value);
-	if (actual !== null) {
+	const accepted = accept(outcome.value);
+	if (accepted !== null && accepted.verdict === "unverifiable") {
+		return {
+			...meta,
+			status: "UNVERIFIABLE",
+			expected,
+			actual: accepted.actual,
+			evidence: { ledger },
+			durationMs,
+		};
+	}
+	if (accepted !== null) {
 		return {
 			...meta,
 			status: "PASS",
 			expected,
-			actual,
+			actual: accepted.actual,
 			evidence: { ledger },
 			durationMs,
 		};
@@ -64,7 +88,10 @@ function mapReadOutcome(
 		...meta,
 		status: "FAIL",
 		expected,
-		actual: `returned unexpected value ${String(outcome.value)}`,
+		actual:
+			outcome.value === null
+				? `returned void, expected ${expected}`
+				: `returned unexpected value ${String(outcome.value)}`,
 		evidence: { ledger },
 		durationMs,
 	};
@@ -92,9 +119,36 @@ async function execute(
 	};
 }
 
+/**
+ * Interface-layer short-circuit: when the spec is determinable (WASM) and
+ * does not declare `method`, the function is absent — NOT_IMPLEMENTED,
+ * reported under the interface layer (absence is an interface verdict, not
+ * a behavior one) without spending a simulation. `null` spec means
+ * undeterminable (SAC): proceed to simulation as today.
+ */
+function notImplemented(
+	meta: CheckMeta,
+	method: string,
+	durationMs: number,
+): CheckResult {
+	return {
+		...meta,
+		layer: "interface",
+		status: "NOT_IMPLEMENTED",
+		expected: `${method}() is implemented`,
+		actual: `contract spec declares no '${method}'`,
+		evidence: {},
+		durationMs,
+	};
+}
+
+function isDeclared(ctx: Sep41Context, method: string): boolean {
+	return ctx.specFunctions === null || ctx.specFunctions.includes(method);
+}
 // Sanity bound, not spec: SEP-41 puts no maximum on decimals. Anything
 // above this almost certainly indicates a decode error rather than a real
-// token (Stellar assets use 7 or fewer).
+// token (Stellar assets use 7 or fewer) — so out-of-range routes to
+// UNVERIFIABLE, never FAIL: accusing a spec-legal value would be false.
 const MAX_PLAUSIBLE_DECIMALS = 38;
 const decimalsMeta = {
 	id: "sep41-decimals",
@@ -107,6 +161,10 @@ export const decimalsCheck: Check<Sep41Context> = {
 	...decimalsMeta,
 	description: "decimals() returns the token's decimal precision",
 	async run(ctx) {
+		const started = Date.now();
+		if (!isDeclared(ctx, "decimals")) {
+			return notImplemented(decimalsMeta, "decimals", Date.now() - started);
+		}
 		const { simLatestLedger, outcome, durationMs } = await execute(ctx, {
 			contractId: ctx.contractId,
 			method: "decimals",
@@ -117,13 +175,22 @@ export const decimalsCheck: Check<Sep41Context> = {
 			"u32 decimal precision",
 			simLatestLedger,
 			outcome,
-			(value) =>
-				typeof value === "number" &&
-				Number.isInteger(value) &&
-				value >= 0 &&
-				value <= MAX_PLAUSIBLE_DECIMALS
-					? `returned ${value}`
-					: null,
+			(value) => {
+				if (
+					typeof value !== "number" ||
+					!Number.isInteger(value) ||
+					value < 0
+				) {
+					return null;
+				}
+				if (value <= MAX_PLAUSIBLE_DECIMALS) {
+					return { verdict: "pass", actual: `returned ${value}` } as const;
+				}
+				return {
+					verdict: "unverifiable",
+					actual: `returned ${value}, outside plausible bounds`,
+				} as const;
+			},
 			durationMs,
 		);
 	},
@@ -140,6 +207,10 @@ export const balanceCheck: Check<Sep41Context> = {
 	...balanceMeta,
 	description: "balance() returns a non-negative holding for an address",
 	async run(ctx) {
+		const started = Date.now();
+		if (!isDeclared(ctx, "balance")) {
+			return notImplemented(balanceMeta, "balance", Date.now() - started);
+		}
 		const { simLatestLedger, outcome, durationMs } = await execute(ctx, {
 			contractId: ctx.contractId,
 			method: "balance",
@@ -151,7 +222,9 @@ export const balanceCheck: Check<Sep41Context> = {
 			simLatestLedger,
 			outcome,
 			(value) =>
-				typeof value === "bigint" && value >= 0n ? `balance is ${value}` : null,
+				typeof value === "bigint" && value >= 0n
+					? { verdict: "pass", actual: `balance is ${value}` }
+					: null,
 			durationMs,
 		);
 	},
@@ -168,6 +241,10 @@ export const allowanceCheck: Check<Sep41Context> = {
 	...allowanceMeta,
 	description: "allowance() returns a non-negative spend approval",
 	async run(ctx) {
+		const started = Date.now();
+		if (!isDeclared(ctx, "allowance")) {
+			return notImplemented(allowanceMeta, "allowance", Date.now() - started);
+		}
 		const { simLatestLedger, outcome, durationMs } = await execute(ctx, {
 			contractId: ctx.contractId,
 			method: "allowance",
@@ -180,7 +257,75 @@ export const allowanceCheck: Check<Sep41Context> = {
 			outcome,
 			(value) =>
 				typeof value === "bigint" && value >= 0n
-					? `allowance is ${value}`
+					? { verdict: "pass", actual: `allowance is ${value}` }
+					: null,
+			durationMs,
+		);
+	},
+};
+
+const nameMeta = {
+	id: "sep41-name",
+	clause: "SEP-41 §name",
+	layer: "interface",
+	requirement: "required",
+} as const satisfies CheckMeta;
+
+export const nameCheck: Check<Sep41Context> = {
+	...nameMeta,
+	description: "name() returns the token's human-readable name",
+	async run(ctx) {
+		const started = Date.now();
+		if (!isDeclared(ctx, "name")) {
+			return notImplemented(nameMeta, "name", Date.now() - started);
+		}
+		const { simLatestLedger, outcome, durationMs } = await execute(ctx, {
+			contractId: ctx.contractId,
+			method: "name",
+			args: [],
+		});
+		return mapReadOutcome(
+			nameMeta,
+			"string token name",
+			simLatestLedger,
+			outcome,
+			(value) =>
+				typeof value === "string" && value.trim() !== ""
+					? { verdict: "pass", actual: `name is "${value}"` }
+					: null,
+			durationMs,
+		);
+	},
+};
+
+const symbolMeta = {
+	id: "sep41-symbol",
+	clause: "SEP-41 §symbol",
+	layer: "interface",
+	requirement: "required",
+} as const satisfies CheckMeta;
+
+export const symbolCheck: Check<Sep41Context> = {
+	...symbolMeta,
+	description: "symbol() returns the token's ticker symbol",
+	async run(ctx) {
+		const started = Date.now();
+		if (!isDeclared(ctx, "symbol")) {
+			return notImplemented(symbolMeta, "symbol", Date.now() - started);
+		}
+		const { simLatestLedger, outcome, durationMs } = await execute(ctx, {
+			contractId: ctx.contractId,
+			method: "symbol",
+			args: [],
+		});
+		return mapReadOutcome(
+			symbolMeta,
+			"string token symbol",
+			simLatestLedger,
+			outcome,
+			(value) =>
+				typeof value === "string" && value.trim() !== ""
+					? { verdict: "pass", actual: `symbol is "${value}"` }
 					: null,
 			durationMs,
 		);
