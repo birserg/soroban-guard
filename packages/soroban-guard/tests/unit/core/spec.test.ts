@@ -159,16 +159,19 @@ describe("inspectContract", () => {
 					externalRef: {},
 				},
 			}),
-			getExternalRefWasmHash: async () => {
+			getExternalRefWasmHash: vi.fn(async () => {
 				throw { code: 404 };
-			},
-		} as unknown as rpc.Server;
+			}),
+		} as unknown as rpc.Server & {
+			getExternalRefWasmHash: ReturnType<typeof vi.fn>;
+		};
 		await expect(
 			inspectContract(
 				server,
 				"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
 			),
 		).resolves.toEqual({ kind: "native" });
+		expect(server.getExternalRefWasmHash).toHaveBeenCalledTimes(1);
 	});
 
 	it("falls back to native on malformed external refs", async () => {

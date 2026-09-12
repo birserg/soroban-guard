@@ -150,10 +150,13 @@ function isDeclared(ctx: Sep41Context, method: string): boolean {
  * No-standing short-circuit: a throwaway probe has no trustline, no
  * history, nothing — a trap against it proves nothing about the contract,
  * because the call never had standing to succeed (e.g. SAC's
- * "trustline entry is missing"). Narrow by construction: only the
- * address-dependent reads (balance, allowance) call this, and only when
- * ctx.ownerIsThrowaway. A trap on a supplied address, or on
- * decimals/name/symbol, stays FAIL.
+ * "trustline entry is missing"). Narrow by construction, on two axes:
+ * only the address-dependent reads (balance, allowance) call this, only
+ * when ctx.ownerIsThrowaway, and only when the spec is undeterminable
+ * (ctx.specFunctions === null — SAC-type contracts where trustlines
+ * exist). On WASM-declared contracts there is no trustline concept, so a
+ * trap there is genuine contract behavior and stays FAIL. A trap on a
+ * supplied address, or on decimals/name/symbol, stays FAIL.
  */
 function noStandingTrap(
 	meta: CheckMeta,
@@ -172,10 +175,12 @@ function noStandingTrap(
 		durationMs,
 	};
 }
-// Sanity bound, not spec: SEP-41 puts no maximum on decimals. Anything
-// above this almost certainly indicates a decode error rather than a real
-// token (Stellar assets use 7 or fewer) — so out-of-range routes to
-// UNVERIFIABLE, never FAIL: accusing a spec-legal value would be false.
+// Sanity bound, not spec: SEP-41 puts no maximum on decimals, and a
+// successfully decoded u32 is conclusive by itself (Stellar assets use 7
+// or fewer, but the standard allows the full range). Out-of-range values
+// therefore PASS with the anomaly visible in the message — never FAIL
+// (no accusation on spec-legal values) and never UNVERIFIABLE (the answer
+// was observed and decoded).
 const MAX_PLAUSIBLE_DECIMALS = 38;
 const decimalsMeta = {
 	id: "sep41-decimals",
@@ -214,8 +219,8 @@ export const decimalsCheck: Check<Sep41Context> = {
 					return { verdict: "pass", actual: `returned ${value}` } as const;
 				}
 				return {
-					verdict: "unverifiable",
-					actual: `returned ${value}, outside plausible bounds`,
+					verdict: "pass",
+					actual: `returned ${value} (outside plausible bounds)`,
 				} as const;
 			},
 			durationMs,
@@ -243,7 +248,11 @@ export const balanceCheck: Check<Sep41Context> = {
 			method: "balance",
 			args: [addressArg(ctx.owner)],
 		});
-		if (outcome.kind === "trapped" && ctx.ownerIsThrowaway) {
+		if (
+			outcome.kind === "trapped" &&
+			ctx.ownerIsThrowaway &&
+			ctx.specFunctions === null
+		) {
 			return noStandingTrap(
 				balanceMeta,
 				"non-negative balance for the holder",
@@ -295,7 +304,11 @@ export const allowanceCheck: Check<Sep41Context> = {
 			method: "allowance",
 			args: [addressArg(ctx.owner), addressArg(ctx.spender)],
 		});
-		if (outcome.kind === "trapped" && ctx.ownerIsThrowaway) {
+		if (
+			outcome.kind === "trapped" &&
+			ctx.ownerIsThrowaway &&
+			ctx.specFunctions === null
+		) {
 			return noStandingTrap(
 				allowanceMeta,
 				"non-negative allowance from owner to spender",
@@ -354,7 +367,7 @@ export const nameCheck: Check<Sep41Context> = {
 			outcome,
 			(value) =>
 				typeof value === "string" && value.trim() !== ""
-					? { verdict: "pass", actual: `name is "${value}"` }
+					? { verdict: "pass", actual: `name is ${JSON.stringify(value)}` }
 					: null,
 			durationMs,
 		);
@@ -388,7 +401,7 @@ export const symbolCheck: Check<Sep41Context> = {
 			outcome,
 			(value) =>
 				typeof value === "string" && value.trim() !== ""
-					? { verdict: "pass", actual: `symbol is "${value}"` }
+					? { verdict: "pass", actual: `symbol is ${JSON.stringify(value)}` }
 					: null,
 			durationMs,
 		);

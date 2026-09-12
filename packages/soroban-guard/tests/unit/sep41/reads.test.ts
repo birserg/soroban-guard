@@ -107,11 +107,15 @@ describe("decimalsCheck", () => {
 		expect(result.actual).toContain("no return value");
 	});
 
-	it("reports UNVERIFIABLE for spec-legal but insane values", async () => {
+	it("passes spec-legal values with the anomaly visible, not verdict-changing", async () => {
+		// u32-ness is established by successful decode, so any u32 passes;
+		// the bound survives only as warning text, since neither FAIL (false
+		// accusation on spec-legal values) nor UNVERIFIABLE (the answer was
+		// observed) is honest.
 		const result = await decimalsCheck.run(
 			ctxWith(stubServer(okResponse(xdr.ScVal.scvU32(100)))),
 		);
-		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.status).toBe("PASS");
 		expect(result.actual).toContain("outside plausible bounds");
 	});
 
@@ -171,6 +175,15 @@ describe("balanceCheck", () => {
 		expect(result.status).toBe("FAIL");
 		expect(result.evidence.error).toBe("trustline entry is missing");
 	});
+
+	it("fails a trap on a generated probe against a WASM-declared contract", async () => {
+		// The no-standing fallback is SAC-scoped: with a declared spec
+		// there is no trustline concept, so the trap is genuine behavior.
+		const server = stubServer(errorResponse("trustline entry is missing"));
+		const result = await balanceCheck.run(ctxWith(server, ["balance"], true));
+		expect(result.status).toBe("FAIL");
+		expect(result.evidence.error).toBe("trustline entry is missing");
+	});
 });
 
 describe("allowanceCheck", () => {
@@ -204,6 +217,15 @@ describe("allowanceCheck", () => {
 		expect(result.actual).toContain("without standing");
 		expect(result.evidence.error).toBe("trustline entry is missing");
 	});
+
+	it("fails a trap on a generated probe against a WASM-declared contract", async () => {
+		const server = stubServer(errorResponse("trustline entry is missing"));
+		const result = await allowanceCheck.run(
+			ctxWith(server, ["allowance"], true),
+		);
+		expect(result.status).toBe("FAIL");
+		expect(result.evidence.error).toBe("trustline entry is missing");
+	});
 });
 
 describe("nameCheck", () => {
@@ -229,6 +251,16 @@ describe("nameCheck", () => {
 			const result = await nameCheck.run(ctxWith(stubServer(okResponse(name))));
 			expect(result.status).toBe("FAIL");
 		}
+	});
+
+	it("escapes control characters from contract metadata", async () => {
+		const result = await nameCheck.run(
+			ctxWith(stubServer(okResponse("A\n\x1b[31mB"))),
+		);
+		expect(result.status).toBe("PASS");
+		expect(result.actual).not.toContain("\n");
+		expect(result.actual).not.toContain("\x1b");
+		expect(result.actual).toContain("\\n");
 	});
 });
 
