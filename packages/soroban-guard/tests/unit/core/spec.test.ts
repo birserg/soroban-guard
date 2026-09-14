@@ -100,11 +100,19 @@ describe("inspectContract", () => {
 	});
 
 	it("falls back to native when code is unfetchable", async () => {
+		// The hash must be a real Uint8Array: without it the shape guard
+		// returns native before the fetch, and this test would pass without
+		// ever reaching the 404 branch it is named for.
+		let fetched = false;
 		const server = {
 			getContractInstance: async () => ({
-				executable: { type: "contractExecutableWasm", value: {} },
+				executable: {
+					type: "contractExecutableWasm",
+					value: { value: new Uint8Array([1, 2, 3]) },
+				},
 			}),
 			getContractWasmByHash: async () => {
+				fetched = true;
 				throw { code: 404 };
 			},
 		} as unknown as rpc.Server;
@@ -114,6 +122,7 @@ describe("inspectContract", () => {
 				"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
 			),
 		).resolves.toEqual({ kind: "native" });
+		expect(fetched).toBe(true);
 	});
 
 	it("does not mistake unrelated Not Found messages for missing", async () => {
