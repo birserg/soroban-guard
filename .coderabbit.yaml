@@ -1,0 +1,6 @@
+# CodeRabbit reviews stacked PRs too: without this, only PRs targeting
+# the default branch get auto-reviewed, and the stack above #1 is skipped.
+reviews:
+  auto_review:
+    base_branches:
+      - '.*'

@@ -1,0 +1,29 @@
+name: New check proposal
+description: Propose a SEP conformance check the guard should run
+title: "[check]: "
+labels: ["enhancement"]
+body:
+  - type: input
+    id: clause
+    attributes:
+      label: Spec clause
+      description: e.g. SEP-41 §transfer_from — link the spec text
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - interface
+        - behavior
+        - events
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Positive and negative cases
+      description: What should PASS, what must trap, and what evidence proves each?
+    validations:
+      required: true
