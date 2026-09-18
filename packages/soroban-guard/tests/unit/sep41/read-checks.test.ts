@@ -7,13 +7,11 @@ import {
 	xdr,
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import {
-	allowanceCheck,
-	balanceCheck,
-	decimalsCheck,
-	nameCheck,
-	symbolCheck,
-} from "../../../src/sep41/checks/reads.ts";
+import { allowanceCheck } from "../../../src/sep41/checks/allowance.ts";
+import { balanceCheck } from "../../../src/sep41/checks/balance.ts";
+import { decimalsCheck } from "../../../src/sep41/checks/decimals.ts";
+import { nameCheck } from "../../../src/sep41/checks/name.ts";
+import { symbolCheck } from "../../../src/sep41/checks/symbol.ts";
 import type { Sep41Context } from "../../../src/sep41/context.ts";
 import {
 	answerlessSuccess,
@@ -46,9 +44,12 @@ function ctxWith(
 		contractId: Address.contract(new Uint8Array(32)).toString(),
 		source: new Account(owner, "1"),
 		networkPassphrase: Networks.TESTNET,
-		owner,
-		spender,
-		ownerIsThrowaway,
+		// Reads need identity only; no signer means write checks would
+		// report UNVERIFIABLE, which is the correct state for a read fixture.
+		parties: {
+			owner: { address: owner, isThrowaway: ownerIsThrowaway },
+			spender: { address: spender, isThrowaway: false },
+		},
 		specFunctions,
 	};
 }
@@ -160,29 +161,53 @@ describe("balanceCheck", () => {
 		expect(result.actual).toBe("balance is 0");
 	});
 
-	it("reports UNVERIFIABLE for a trap on a generated probe", async () => {
+	it("reports UNVERIFIABLE for a missing-trustline trap", async () => {
 		const server = stubServer(errorResponse("trustline entry is missing"));
 		const result = await balanceCheck.run(ctxWith(server, null, true));
 		expect(result.status).toBe("UNVERIFIABLE");
-		expect(result.actual).toContain("without standing");
+		expect(result.actual).toContain("holds no trustline");
 		expect(result.evidence.error).toBe("trustline entry is missing");
 	});
 
-	it("fails a trap on a configured owner", async () => {
+	// Regression: this used to FAIL. Whether the address was generated or
+	// supplied says nothing about standing — a real account that simply
+	// does not hold the asset is the ordinary case, not a contract defect.
+	it("is UNVERIFIABLE for a missing-trustline trap on a supplied owner", async () => {
 		const result = await balanceCheck.run(
 			ctxWith(stubServer(errorResponse("trustline entry is missing"))),
 		);
-		expect(result.status).toBe("FAIL");
-		expect(result.evidence.error).toBe("trustline entry is missing");
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("holds no trustline");
 	});
 
-	it("fails a trap on a generated probe against a WASM-declared contract", async () => {
-		// The no-standing fallback is SAC-scoped: with a declared spec
-		// there is no trustline concept, so the trap is genuine behavior.
+	it("is UNVERIFIABLE when the trustline exists but is deauthorized", async () => {
+		const result = await balanceCheck.run(
+			ctxWith(stubServer(errorResponse("balance is deauthorized"))),
+		);
+		expect(result.status).toBe("UNVERIFIABLE");
+		expect(result.actual).toContain("not authorized");
+		// The remediation must match the cause: another address the reader
+		// owns would fare no better, so it must not suggest one.
+		expect(result.actual).toContain("issuer must authorize");
+		expect(result.actual).not.toContain("point OWNER_ADDRESS");
+	});
+
+	// Classification follows the symptom, not the contract kind: a WASM
+	// token reporting a missing trustline is describing the same standing
+	// problem, so it is UNVERIFIABLE there too.
+	it("classifies by the diagnostic, not by whether a spec was declared", async () => {
 		const server = stubServer(errorResponse("trustline entry is missing"));
-		const result = await balanceCheck.run(ctxWith(server, ["balance"], true));
+		const result = await balanceCheck.run(
+			ctxWith(server, ["balance", "allowance"], true),
+		);
+		expect(result.status).toBe("UNVERIFIABLE");
+	});
+
+	it("still FAILs a trap that is genuine contract behavior", async () => {
+		const server = stubServer(errorResponse("Error(Contract, #7)"));
+		const result = await balanceCheck.run(ctxWith(server, null, true));
 		expect(result.status).toBe("FAIL");
-		expect(result.evidence.error).toBe("trustline entry is missing");
+		expect(result.evidence.error).toBe("Error(Contract, #7)");
 	});
 });
 
@@ -210,21 +235,28 @@ describe("allowanceCheck", () => {
 		expect(result.actual).toContain("OWNER_ADDRESS");
 	});
 
-	it("reports UNVERIFIABLE for a trap on a generated probe", async () => {
+	it("reports UNVERIFIABLE for a missing-trustline trap", async () => {
 		const server = stubServer(errorResponse("trustline entry is missing"));
 		const result = await allowanceCheck.run(ctxWith(server, null, true));
 		expect(result.status).toBe("UNVERIFIABLE");
-		expect(result.actual).toContain("without standing");
+		expect(result.actual).toContain("holds no trustline");
 		expect(result.evidence.error).toBe("trustline entry is missing");
 	});
 
-	it("fails a trap on a generated probe against a WASM-declared contract", async () => {
+	// Classification follows the symptom, not the contract kind.
+	it("classifies by the diagnostic, not by whether a spec was declared", async () => {
 		const server = stubServer(errorResponse("trustline entry is missing"));
 		const result = await allowanceCheck.run(
 			ctxWith(server, ["allowance"], true),
 		);
+		expect(result.status).toBe("UNVERIFIABLE");
+	});
+
+	it("still FAILs a trap that is genuine contract behavior", async () => {
+		const server = stubServer(errorResponse("Error(Contract, #7)"));
+		const result = await allowanceCheck.run(ctxWith(server, null, true));
 		expect(result.status).toBe("FAIL");
-		expect(result.evidence.error).toBe("trustline entry is missing");
+		expect(result.evidence.error).toBe("Error(Contract, #7)");
 	});
 });
 

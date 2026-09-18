@@ -35,9 +35,10 @@ describe.skipIf(!(OWNER && SPENDER))("SEP-41 reads against nothing", () => {
 			contractId: EMPTY_CONTRACT,
 			source,
 			networkPassphrase: PASSPHRASE,
-			owner: OWNER,
-			spender: SPENDER,
-			ownerIsThrowaway: false,
+			parties: {
+				owner: { address: OWNER, isThrowaway: false },
+				spender: { address: SPENDER, isThrowaway: false },
+			},
 			specFunctions: null,
 		};
 		const assessed = await runSuite(sep41Suite, ctx);
@@ -47,8 +48,12 @@ describe.skipIf(!(OWNER && SPENDER))("SEP-41 reads against nothing", () => {
 			expect(result?.status).toBe("FAIL");
 			expect(result?.evidence.error).toBeDefined();
 		}
+		// transfer is in the suite but never reaches the contract: no signer
+		// is configured here, so it reports about us, not about the address.
+		// Everything past it is an unassessed-member gap row.
 		for (const result of results.slice(5)) {
 			expect(result?.status).toBe("UNVERIFIABLE");
 		}
+		expect(results[5]?.id).toBe("sep41-transfer");
 	}, 60_000);
 });
