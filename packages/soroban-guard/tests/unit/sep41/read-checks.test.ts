@@ -278,11 +278,30 @@ describe("nameCheck", () => {
 		expect(result.status).toBe("FAIL");
 	});
 
-	it("fails empty and blank names", async () => {
+	// SEP-41 declares `name() -> String` with no content requirement, so
+	// FAILing an empty one invents a rule and accuses a conformant contract.
+	// The anomaly is still worth seeing, so it rides in the message.
+	it("passes an empty or blank name with the anomaly reported", async () => {
 		for (const name of ["", "   "]) {
 			const result = await nameCheck.run(ctxWith(stubServer(okResponse(name))));
-			expect(result.status).toBe("FAIL");
+			expect(result.status).toBe("PASS");
+			expect(result.actual).toContain("empty");
 		}
+	});
+
+	it("does not label a real name as empty", async () => {
+		const result = await nameCheck.run(
+			ctxWith(stubServer(okResponse("Comet Pool Token"))),
+		);
+		expect(result.status).toBe("PASS");
+		expect(result.actual).not.toContain("empty");
+	});
+
+	it("still FAILs a non-string name", async () => {
+		const result = await nameCheck.run(
+			ctxWith(stubServer(okResponse(xdr.ScVal.scvU32(7)))),
+		);
+		expect(result.status).toBe("FAIL");
 	});
 
 	it("escapes control characters from contract metadata", async () => {
@@ -312,8 +331,16 @@ describe("symbolCheck", () => {
 		expect(result.status).toBe("NOT_IMPLEMENTED");
 	});
 
-	it("fails an empty symbol", async () => {
+	it("passes an empty symbol with the anomaly reported", async () => {
 		const result = await symbolCheck.run(ctxWith(stubServer(okResponse(""))));
+		expect(result.status).toBe("PASS");
+		expect(result.actual).toContain("empty");
+	});
+
+	it("still FAILs a non-string symbol", async () => {
+		const result = await symbolCheck.run(
+			ctxWith(stubServer(okResponse(xdr.ScVal.scvU32(7)))),
+		);
 		expect(result.status).toBe("FAIL");
 	});
 });

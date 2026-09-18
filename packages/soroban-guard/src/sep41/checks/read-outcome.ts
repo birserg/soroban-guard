@@ -8,7 +8,7 @@
  */
 import type { InvokeResult } from "../../core/invoke.ts";
 import type { CheckResult } from "../../core/types.ts";
-import { type CheckMeta, classifyStanding } from "./shared.ts";
+import { type CheckMeta, classifyStanding, describeValue } from "./shared.ts";
 
 /**
  * What a value assertion can conclude. `pass`/`null` are PASS/FAIL;
@@ -91,17 +91,13 @@ export function mapReadOutcome(
 		actual:
 			outcome.value === null
 				? `returned void, expected ${expected}`
-				: `returned unexpected value ${String(outcome.value)}`,
+				: `returned unexpected value ${describeValue(outcome.value)}`,
 		evidence: { ledger },
 		durationMs,
 	};
 }
 
-/**
- * How a read phrases each standing problem. The remediation differs by
- * cause: a deauthorized trustline needs the issuer, and no other address
- * the reader owns would fare better.
- */
+/** How a read phrases each standing problem. */
 export function noStanding(diagnostics: string): string | null {
 	switch (classifyStanding(diagnostics)) {
 		case "no-trustline":
@@ -113,11 +109,6 @@ export function noStanding(diagnostics: string): string | null {
 	}
 }
 
-/**
- * Report a trap the caller has classified as a standing problem rather than
- * a contract defect. UNVERIFIABLE, never FAIL, and it names the reason so a
- * reader can fix their setup instead of doubting the token.
- */
 export function noStandingTrap(
 	meta: CheckMeta,
 	expected: string,

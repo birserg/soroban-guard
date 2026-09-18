@@ -13,6 +13,7 @@ import { balanceCheck } from "./checks/balance.ts";
 import { decimalsCheck } from "./checks/decimals.ts";
 import { nameCheck } from "./checks/name.ts";
 import { symbolCheck } from "./checks/symbol.ts";
+import { transferCheck } from "./checks/transfer.ts";
 import type { Sep41Context } from "./context.ts";
 
 export type { Sep41Context } from "./context.ts";
@@ -81,5 +82,12 @@ export function withCoverageGaps(
  */
 export const sep41Suite: Suite<Sep41Context> = {
 	standard: "SEP-41",
-	checks: [decimalsCheck, balanceCheck, allowanceCheck, nameCheck, symbolCheck],
+	checks: [
+		decimalsCheck,
+		balanceCheck,
+		allowanceCheck,
+		nameCheck,
+		symbolCheck,
+		transferCheck,
+	],
 };

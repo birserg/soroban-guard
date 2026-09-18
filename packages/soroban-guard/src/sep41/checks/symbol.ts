@@ -33,10 +33,20 @@ export const symbolCheck: Check<Sep41Context> = {
 			"string token symbol",
 			ledger,
 			outcome,
-			(value) =>
-				typeof value === "string" && value.trim() !== ""
-					? { verdict: "pass", actual: `symbol is ${JSON.stringify(value)}` }
-					: null,
+			// Spec-legal when empty — see name.ts for the reasoning. Reported
+			// rather than accused.
+			(value) => {
+				if (typeof value !== "string") {
+					return null;
+				}
+				return {
+					verdict: "pass",
+					actual:
+						value.trim() === ""
+							? `symbol is ${JSON.stringify(value)} (empty; nothing for a wallet to display)`
+							: `symbol is ${JSON.stringify(value)}`,
+				} as const;
+			},
 			elapsed(),
 		);
 	},

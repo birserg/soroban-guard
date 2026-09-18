@@ -33,10 +33,24 @@ export const nameCheck: Check<Sep41Context> = {
 			"string token name",
 			ledger,
 			outcome,
-			(value) =>
-				typeof value === "string" && value.trim() !== ""
-					? { verdict: "pass", actual: `name is ${JSON.stringify(value)}` }
-					: null,
+			// SEP-41 declares `name() -> String` and constrains the content no
+			// further, so an empty or blank name is spec-legal and FAILing it
+			// would accuse a conformant contract. It is still worth seeing —
+			// wallets and explorers have nothing to display — so it passes
+			// with the anomaly in the message, the same treatment decimals
+			// gives an out-of-range but legal value.
+			(value) => {
+				if (typeof value !== "string") {
+					return null;
+				}
+				return {
+					verdict: "pass",
+					actual:
+						value.trim() === ""
+							? `name is ${JSON.stringify(value)} (empty; nothing for a wallet to display)`
+							: `name is ${JSON.stringify(value)}`,
+				} as const;
+			},
 			elapsed(),
 		);
 	},

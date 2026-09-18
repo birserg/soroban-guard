@@ -3,7 +3,7 @@
  * identity, the spec short-circuit, the chain call, and standing
  * classification.
  */
-import type { xdr } from "@stellar/stellar-sdk";
+import { rpc, type xdr } from "@stellar/stellar-sdk";
 import {
 	type InvokeResult,
 	interpretSimulation,
@@ -57,14 +57,28 @@ export async function callRead(
 	ctx: Sep41Context,
 	method: string,
 	args: readonly xdr.ScVal[],
-): Promise<{ readonly outcome: InvokeResult; readonly ledger: number }> {
+): Promise<{
+	readonly outcome: InvokeResult;
+	readonly ledger: number;
+	/**
+	 * True when the answer came from an archived entry that needs
+	 * restoration. Reads may use such an answer — it is what the contract
+	 * returned — but it is last-known state, not current state, so anything
+	 * comparing two observations must not use it as a baseline.
+	 */
+	readonly fromArchive: boolean;
+}> {
 	const sim = await simulateRead(
 		ctx.server,
 		ctx.source,
 		{ contractId: ctx.contractId, method, args },
 		ctx.networkPassphrase,
 	);
-	return { outcome: interpretSimulation(sim), ledger: sim.latestLedger };
+	return {
+		outcome: interpretSimulation(sim),
+		ledger: sim.latestLedger,
+		fromArchive: rpc.Api.isSimulationRestore(sim),
+	};
 }
 
 /**
@@ -101,4 +115,39 @@ export function classifyStanding(diagnostics: string): StandingProblem | null {
 		return "not-authorized";
 	}
 	return null;
+}
+
+/**
+ * A decoded contract return, rendered for a report line.
+ *
+ * `String()` alone is not enough: scValToNative turns a Soroban map into a
+ * plain object, which stringifies to "[object Object]" — no evidence at all
+ * for the one verdict that has to justify itself. Objects are shown by
+ * shape and bigints keep their `n`, so a reader can tell 1 from 1n. Never
+ * throws: a value that resists rendering still has to produce a report.
+ */
+export function describeValue(value: unknown): string {
+	if (value === null) {
+		return "void";
+	}
+	if (typeof value === "bigint") {
+		return `${value}n`;
+	}
+	if (typeof value === "string") {
+		return JSON.stringify(value);
+	}
+	if (typeof value === "object") {
+		try {
+			return JSON.stringify(value, (_key, inner) =>
+				typeof inner === "bigint" ? `${inner}n` : inner,
+			);
+		} catch {
+			return Object.prototype.toString.call(value);
+		}
+	}
+	try {
+		return String(value);
+	} catch {
+		return typeof value;
+	}
 }

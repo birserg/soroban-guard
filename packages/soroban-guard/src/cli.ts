@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 import { type Account, Keypair, rpc, StrKey } from "@stellar/stellar-sdk";
 import { KeypairSigner } from "@stellar/stellar-sdk/contract";
+import { TESTNET_PASSPHRASE, writeRefusalReason } from "./core/consent.ts";
 import { fundAccount, loadSourceAccount } from "./core/funding.ts";
 import { exitCodeFor, renderReport } from "./core/report.ts";
 import { runSuite } from "./core/runner.ts";
@@ -10,15 +11,14 @@ import type { Party, Sep41Context } from "./sep41/context.ts";
 import { sep41Suite, withCoverageGaps } from "./sep41/index.ts";
 
 const USAGE =
-	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http]";
-
-const DEFAULT_PASSPHRASE = "Test SDF Network ; September 2015";
+	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http] [--allow-non-testnet-write]";
 
 let positionals: string[];
 let values: {
 	"rpc-url"?: string;
 	passphrase?: string;
 	"allow-http"?: boolean;
+	"allow-non-testnet-write"?: boolean;
 	help?: boolean;
 };
 try {
@@ -28,6 +28,7 @@ try {
 			"rpc-url": { type: "string" },
 			passphrase: { type: "string" },
 			"allow-http": { type: "boolean" },
+			"allow-non-testnet-write": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 	}));
@@ -134,7 +135,7 @@ function nonEmpty(value: string | undefined): string | undefined {
  */
 function resolvePassphrase(value: string | undefined): string {
 	if (value === undefined) {
-		return DEFAULT_PASSPHRASE;
+		return TESTNET_PASSPHRASE;
 	}
 	if (value.trim() === "") {
 		console.error("passphrase must not be blank");
@@ -165,6 +166,18 @@ const parties = {
 	owner: resolveRole("OWNER", networkPassphrase),
 	spender: resolveRole("SPENDER", networkPassphrase),
 };
+
+const refusal = writeRefusalReason({
+	willSign:
+		parties.owner.signer !== undefined || parties.spender.signer !== undefined,
+	passphrase: networkPassphrase,
+	rpcHostname: new URL(rpcUrl).hostname,
+	override: values["allow-non-testnet-write"] === true,
+});
+if (refusal !== null) {
+	console.error(refusal);
+	process.exit(2);
+}
 
 let server: rpc.Server;
 let source: Account;
