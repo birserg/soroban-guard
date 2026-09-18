@@ -16,7 +16,7 @@ const SPENDER = process.env.SPENDER_ADDRESS;
 describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 	"SEP-41 reads on testnet",
 	() => {
-		it("all five reads PASS", async () => {
+		it("the five reads PASS and the rest report honestly", async () => {
 			if (!CONTRACT || !OWNER || !SPENDER) {
 				throw new Error("unreachable: env guard skipped this suite");
 			}
@@ -28,9 +28,10 @@ describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 				contractId: CONTRACT,
 				source,
 				networkPassphrase: PASSPHRASE,
-				owner: OWNER,
-				spender: SPENDER,
-				ownerIsThrowaway: false,
+				parties: {
+					owner: { address: OWNER, isThrowaway: false },
+					spender: { address: SPENDER, isThrowaway: false },
+				},
 				specFunctions: inspected.kind === "wasm" ? inspected.functions : null,
 			};
 			const assessed = await runSuite(sep41Suite, ctx);
@@ -42,7 +43,13 @@ describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 					`${result?.id} → ${result?.actual} ${result?.evidence.error ?? ""}`,
 				).toBe("PASS");
 			}
-			for (const result of results.slice(5)) {
+			// transfer runs in this suite but has no signer here, so it
+			// reports UNVERIFIABLE about us rather than about the contract.
+			const transfer = results.find((r) => r.id === "sep41-transfer");
+			expect(transfer?.status).toBe("UNVERIFIABLE");
+			expect(transfer?.actual).toContain("no signing authority");
+			// Everything the suite does not assess is an explicit gap row.
+			for (const result of results.slice(6)) {
 				expect(result?.status).toBe("UNVERIFIABLE");
 				expect(result?.actual).toBe("not assessed by this suite");
 			}

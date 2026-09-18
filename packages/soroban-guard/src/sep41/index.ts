@@ -8,13 +8,12 @@
  * become explicit UNVERIFIABLE rows, and the exit code follows.
  */
 import type { CheckResult, Suite } from "../core/types.ts";
-import {
-	allowanceCheck,
-	balanceCheck,
-	decimalsCheck,
-	nameCheck,
-	symbolCheck,
-} from "./checks/reads.ts";
+import { allowanceCheck } from "./checks/allowance.ts";
+import { balanceCheck } from "./checks/balance.ts";
+import { decimalsCheck } from "./checks/decimals.ts";
+import { nameCheck } from "./checks/name.ts";
+import { symbolCheck } from "./checks/symbol.ts";
+import { transferCheck } from "./checks/transfer.ts";
 import type { Sep41Context } from "./context.ts";
 
 export type { Sep41Context } from "./context.ts";
@@ -48,9 +47,9 @@ function memberOf(resultId: string): string | null {
 
 /**
  * Append UNVERIFIABLE rows for required members no check assessed, so the
- * report shows the gap and the exit code reflects it. Without this, five
- * passing checks would exit 0 — "verified conformant" — while transfer,
- * approve and friends were never assessed at all.
+ * report shows the gap and the exit code reflects it. Without this, a suite
+ * would exit 0 — "verified conformant" — on the strength of the members it
+ * happens to cover, while approve, burn and friends went unexamined.
  */
 export function withCoverageGaps(
 	results: readonly CheckResult[],
@@ -83,5 +82,12 @@ export function withCoverageGaps(
  */
 export const sep41Suite: Suite<Sep41Context> = {
 	standard: "SEP-41",
-	checks: [decimalsCheck, balanceCheck, allowanceCheck, nameCheck, symbolCheck],
+	checks: [
+		decimalsCheck,
+		balanceCheck,
+		allowanceCheck,
+		nameCheck,
+		symbolCheck,
+		transferCheck,
+	],
 };

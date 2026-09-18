@@ -1,23 +1,24 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { type Account, Keypair, rpc, StrKey } from "@stellar/stellar-sdk";
+import { KeypairSigner } from "@stellar/stellar-sdk/contract";
+import { TESTNET_PASSPHRASE, writeRefusalReason } from "./core/consent.ts";
 import { fundAccount, loadSourceAccount } from "./core/funding.ts";
 import { exitCodeFor, renderReport } from "./core/report.ts";
 import { runSuite } from "./core/runner.ts";
 import { inspectContract } from "./core/spec.ts";
-import type { Sep41Context } from "./sep41/context.ts";
+import type { Party, Sep41Context } from "./sep41/context.ts";
 import { sep41Suite, withCoverageGaps } from "./sep41/index.ts";
 
 const USAGE =
-	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http]";
-
-const DEFAULT_PASSPHRASE = "Test SDF Network ; September 2015";
+	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http] [--allow-non-testnet-write]";
 
 let positionals: string[];
 let values: {
 	"rpc-url"?: string;
 	passphrase?: string;
 	"allow-http"?: boolean;
+	"allow-non-testnet-write"?: boolean;
 	help?: boolean;
 };
 try {
@@ -27,6 +28,7 @@ try {
 			"rpc-url": { type: "string" },
 			passphrase: { type: "string" },
 			"allow-http": { type: "boolean" },
+			"allow-non-testnet-write": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 	}));
@@ -61,28 +63,62 @@ if (!StrKey.isValidContract(contractId)) {
 }
 
 /**
- * Probe addresses. Reads never spend and never need a balance — `balance()`
- * on an address holding nothing is still a conformance observation — so an
- * unconfigured run generates throwaway accounts rather than refusing to
- * start. Supplying the env vars points the probes at a specific holder,
- * which is what you want when asserting real balances on a token you own.
+ * Resolve one role's address and, when this run holds the key, its signer.
+ *
+ * `<ROLE>_SECRET` is the stronger source: a secret key contains its own
+ * public key, so it settles the address by itself. `<ROLE>_ADDRESS` alone
+ * gives reads a real holder to observe while leaving writes UNVERIFIABLE.
+ * Neither generates a throwaway — reads still observe something, writes
+ * still report honestly.
+ *
+ * A secret that disagrees with a supplied address is a misconfiguration,
+ * not a preference to resolve: reading one account's balance while signing
+ * as another produces a FAIL that says nothing about the contract. So it
+ * exits rather than picking a winner, the same way a blank passphrase does.
  */
-const ownerEnv = nonEmpty(process.env.OWNER_ADDRESS);
-const owner = ownerEnv ?? Keypair.random().publicKey();
-// Remembered, not inferred: a generated probe asserting balance 0 proves
-// nothing (it passes on every token, including always-zero bugs), so the
-// balance check reports it UNVERIFIABLE instead of PASS.
-const ownerIsThrowaway = ownerEnv === undefined;
-const spender =
-	nonEmpty(process.env.SPENDER_ADDRESS) ?? Keypair.random().publicKey();
-for (const [role, address] of [
-	["owner", owner],
-	["spender", spender],
-] as const) {
-	if (!StrKey.isValidEd25519PublicKey(address)) {
-		console.error(`invalid ${role} address: ${address}`);
+function resolveRole(
+	role: "OWNER" | "SPENDER",
+	// A signer binds the network it signs for, so the passphrase is a
+	// parameter rather than a closed-over const: the ordering constraint is
+	// then visible in the signature instead of being a TDZ throw waiting for
+	// whoever reorders CLI setup next.
+	networkPassphrase: string,
+): Party {
+	const declared = nonEmpty(process.env[`${role}_ADDRESS`]);
+	const secret = nonEmpty(process.env[`${role}_SECRET`]);
+	if (declared !== undefined && !StrKey.isValidEd25519PublicKey(declared)) {
+		console.error(`invalid ${role}_ADDRESS: ${declared}`);
 		process.exit(2);
 	}
+	if (secret === undefined) {
+		return {
+			address: declared ?? Keypair.random().publicKey(),
+			isThrowaway: declared === undefined,
+		};
+	}
+	let keypair: Keypair;
+	try {
+		keypair = Keypair.fromSecret(secret);
+	} catch {
+		// Never echo the value — it is a private key.
+		console.error(`invalid ${role}_SECRET: not a valid S... secret key`);
+		process.exit(2);
+	}
+	const address = keypair.publicKey();
+	if (declared !== undefined && declared !== address) {
+		console.error(
+			`${role}_SECRET is the key for ${address}, but ${role}_ADDRESS is ${declared}`,
+		);
+		process.exit(2);
+	}
+	return {
+		address,
+		// KeypairSigner is a Signer already — it carries the address it signs
+		// as, so there is no pair of fields to keep in sync. The SDK's own
+		// basicNodeSigner docs point here for exactly that reason.
+		signer: new KeypairSigner(keypair, networkPassphrase),
+		isThrowaway: false,
+	};
 }
 
 /** Empty/blank flags behave as unset: `--rpc-url ""` must fall back to env
@@ -99,7 +135,7 @@ function nonEmpty(value: string | undefined): string | undefined {
  */
 function resolvePassphrase(value: string | undefined): string {
 	if (value === undefined) {
-		return DEFAULT_PASSPHRASE;
+		return TESTNET_PASSPHRASE;
 	}
 	if (value.trim() === "") {
 		console.error("passphrase must not be blank");
@@ -126,6 +162,23 @@ const networkPassphrase = resolvePassphrase(
 	values.passphrase ?? process.env.NETWORK_PASSPHRASE,
 );
 
+const parties = {
+	owner: resolveRole("OWNER", networkPassphrase),
+	spender: resolveRole("SPENDER", networkPassphrase),
+};
+
+const refusal = writeRefusalReason({
+	willSign:
+		parties.owner.signer !== undefined || parties.spender.signer !== undefined,
+	passphrase: networkPassphrase,
+	rpcHostname: new URL(rpcUrl).hostname,
+	override: values["allow-non-testnet-write"] === true,
+});
+if (refusal !== null) {
+	console.error(refusal);
+	process.exit(2);
+}
+
 let server: rpc.Server;
 let source: Account;
 let specFunctions: readonly string[] | null;
@@ -134,9 +187,9 @@ try {
 	// RPC call, so construction lives inside the guarded block too.
 	// Order inside is deliberate: inspect first, so a missing ID exits
 	// before spending faucet quota or waiting out polls; fund next
-	// (check-first: funded accounts are untouched, and funding verifies
-	// both owner and spender exist); load last, so a post-funding load
-	// failure genuinely means unreachable.
+	// (check-first, owner only: it sources and signs every call, and an
+	// untouched funded account costs nothing); load last, so a
+	// post-funding load failure genuinely means unreachable.
 	server = new rpc.Server(rpcUrl, {
 		allowHttp: values["allow-http"] === true,
 	});
@@ -149,9 +202,13 @@ try {
 		process.exit(2);
 	}
 	specFunctions = inspected.kind === "wasm" ? inspected.functions : null;
-	await fundAccount(server, owner);
-	await fundAccount(server, spender);
-	source = await loadSourceAccount(server, owner);
+	// Only the owner. It sources and signs every call the suite makes; the
+	// spender is an argument, never a source, so funding it spends faucet
+	// quota for nothing and adds a failure that would abort a run whose
+	// reads would otherwise have passed. Fund it when a spender-signed
+	// check lands, not before.
+	await fundAccount(server, parties.owner.address);
+	source = await loadSourceAccount(server, parties.owner.address);
 } catch (error) {
 	console.error(
 		`cannot prepare run: ${error instanceof Error ? error.message : String(error)}`,
@@ -166,15 +223,14 @@ const ctx: Sep41Context = {
 	contractId,
 	source,
 	networkPassphrase,
-	owner,
-	spender,
-	ownerIsThrowaway,
 	specFunctions,
+	parties,
 };
 
 const assessed = await runSuite(sep41Suite, ctx);
-// Unassessed members become UNVERIFIABLE rows: without this, five passing
-// checks would exit 0 while half the standard went unexamined.
+// Unassessed members become UNVERIFIABLE rows: without this, a suite that
+// passes every check it happens to own would exit 0 — "verified conformant"
+// — while the members it never examined went unreported.
 const results = withCoverageGaps(assessed);
 console.log(
 	renderReport({ standard: sep41Suite.standard, contractId, results }),
