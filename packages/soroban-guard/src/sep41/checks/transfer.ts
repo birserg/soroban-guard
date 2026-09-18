@@ -37,11 +37,10 @@ import { addressArg, amountArg, submitWrite } from "../../core/invoke.ts";
 import type { CheckResult } from "../../core/types.ts";
 import type { Sep41Context } from "../context.ts";
 import { assertDeltas, writeEvidence } from "./delta.ts";
+import { type QuantityRead, readBalance } from "./quantity.ts";
 import {
 	type CheckMeta,
-	callRead,
 	classifyStanding,
-	describeValue,
 	isDeclared,
 	notImplemented,
 } from "./shared.ts";
@@ -96,61 +95,6 @@ const EXPECTED = "transfer moves the amount from holder to recipient";
  * answers. Only a read that genuinely produced nothing (standing problem,
  * restore needed, answerless success) is our limitation rather than theirs.
  */
-type BalanceRead =
-	| { readonly kind: "value"; readonly balance: bigint }
-	| { readonly kind: "defect"; readonly detail: string; readonly error: string }
-	| { readonly kind: "no-answer"; readonly detail: string };
-
-async function readBalance(
-	ctx: Sep41Context,
-	address: string,
-): Promise<BalanceRead> {
-	const { outcome, fromArchive } = await callRead(ctx, "balance", [
-		addressArg(address),
-	]);
-	// A restored answer is last-known state, and the transfer itself will
-	// bring the entry current — so a baseline taken from the archive would
-	// be differenced against a fresh after-read and the gap blamed on the
-	// contract. Reads may use such an answer; a delta may not.
-	if (fromArchive) {
-		return {
-			kind: "no-answer",
-			detail: "the balance came from an archived entry, not current state",
-		};
-	}
-	if (outcome.kind === "ok") {
-		if (typeof outcome.value !== "bigint") {
-			return {
-				kind: "defect",
-				detail: `balance() returned ${describeValue(outcome.value)}, expected an i128`,
-				error: "",
-			};
-		}
-		// SEP-41 balances are non-negative, and balanceCheck FAILs a negative
-		// one. Classified here rather than in a caller's prelude so both read
-		// phases reach the same verdict on the same response.
-		if (outcome.value < 0n) {
-			return {
-				kind: "defect",
-				detail: `balance() returned ${outcome.value}, which is negative`,
-				error: "",
-			};
-		}
-		return { kind: "value", balance: outcome.value };
-	}
-	if (outcome.kind === "trapped") {
-		const standing = classifyStanding(outcome.diagnostics);
-		return standing === null
-			? {
-					kind: "defect",
-					detail: "balance() trapped",
-					error: outcome.diagnostics,
-				}
-			: { kind: "no-answer", detail: "a balance could not be read" };
-	}
-	return { kind: "no-answer", detail: "a balance could not be read" };
-}
-
 function unverifiable(
 	actual: string,
 	durationMs: number,
@@ -246,8 +190,8 @@ export const transferCheck = {
 				elapsed(),
 			);
 		}
-		const beforeOwner = ownerRead.balance;
-		const beforeSpender = spenderRead.balance;
+		const beforeOwner = ownerRead.amount;
+		const beforeSpender = spenderRead.amount;
 		if (beforeOwner < TRANSFER_AMOUNT) {
 			return unverifiable(
 				`holder has ${beforeOwner}, nothing to transfer`,
@@ -335,8 +279,8 @@ export const transferCheck = {
 		// the hash: letting the throw reach the runner reports SKIPPED with
 		// no evidence of a transfer that really happened.
 		const before = { holder: beforeOwner, recipient: beforeSpender };
-		let afterOwner: BalanceRead | null = null;
-		let afterSpender: BalanceRead | null = null;
+		let afterOwner: QuantityRead | null = null;
+		let afterSpender: QuantityRead | null = null;
 		try {
 			afterOwner = await readBalance(ctx, owner.address);
 			afterSpender = await readBalance(ctx, spender.address);
@@ -381,18 +325,18 @@ export const transferCheck = {
 			};
 		}
 		const after = {
-			holder: afterOwner.balance,
-			recipient: afterSpender.balance,
+			holder: afterOwner.amount,
+			recipient: afterSpender.amount,
 		};
 		return assertDeltas(
 			transferMeta,
 			EXPECTED,
 			[
-				{ label: "holder", before: beforeOwner, after: afterOwner.balance },
+				{ label: "holder", before: beforeOwner, after: afterOwner.amount },
 				{
 					label: "recipient",
 					before: beforeSpender,
-					after: afterSpender.balance,
+					after: afterSpender.amount,
 				},
 			],
 			[

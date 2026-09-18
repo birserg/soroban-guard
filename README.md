@@ -6,11 +6,12 @@
 Conformance testing for deployed [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
 Soroban token contracts on Stellar **testnet**.
 
-> **Status: early.** Six of SEP-41's ten members are checked against
-> testnet: the five reads (`decimals`, `balance`, `allowance`, `name`,
-> `symbol`) plus `transfer`, which signs and submits a real transaction and
-> asserts the balance deltas it produced. `approve`, `transfer_from`,
-> `burn`, `burn_from` and negative checks are next.
+> **Status: early.** All ten SEP-41 members are checked against testnet.
+> The five reads (`decimals`, `balance`, `allowance`, `name`, `symbol`) are
+> observed; the five writes (`transfer`, `approve`, `transfer_from`, `burn`,
+> `burn_from`) are performed — signed, submitted, and asserted against the
+> balances and allowances they moved. Negative checks, which confirm a
+> contract *rejects* what it must reject, are next.
 
 ## Usage
 
@@ -53,19 +54,24 @@ OWNER_ADDRESS=G... SPENDER_ADDRESS=G... \
 
 ### Checking writes
 
-`transfer` changes state, so it has to be signed. Without a key it reports
-`UNVERIFIABLE` — never `FAIL`, because a missing key says nothing about the
-contract. Supply the holder's secret to run it for real:
+Five members change state, so they have to be signed. Without a key they
+report `UNVERIFIABLE` — never `FAIL`, because a missing key says nothing
+about the contract. `transfer` and `burn` need the holder's key;
+`transfer_from` and `burn_from` also need the spender's, since the clause
+specifies `spender.require_auth()` and each seeds its own allowance rather
+than depending on `approve` having run first:
 
 ```sh
-OWNER_SECRET=$(stellar keys show owner) SPENDER_ADDRESS=G... \
+OWNER_SECRET=$(stellar keys show owner) \
+SPENDER_SECRET=$(stellar keys show spender) \
   node packages/soroban-guard/src/cli.ts <contract-id>
 ```
 
-The secret settles its own address, so `OWNER_ADDRESS` is redundant
-alongside it — supply both only if you want the mismatch checked. The run
-transfers **1 unit** of the token, the smallest amount that proves movement,
-and reports the before/after balances with the transaction hash and ledger.
+Each secret settles its own address, so `*_ADDRESS` is redundant alongside
+it — supply both only if you want the mismatch checked. Every write moves
+**1 unit**, the smallest amount that proves movement, and reports the
+before/after quantities with the transaction hash and ledger. Two of those
+units are burned and not recoverable.
 
 > **Testnet only, by default.** This signs and submits real transactions, so
 > a run that holds a secret refuses unless everything agrees: the passphrase
@@ -84,9 +90,10 @@ and reports the before/after balances with the transaction hash and ledger.
 | `1`  | a verified violation |
 | `2`  | unknown — the run failed, or members went unassessed |
 
-`2` is the honest answer while the suite covers 6 of SEP-41's 10 members:
-passing what it does check cannot establish conformance for `approve`,
-`transfer_from`, `burn` and `burn_from`, which it does not check yet.
+`0` requires every required member to have been assessed and passed, which
+in practice means a run configured with both keys against a token the
+holder actually holds. Anything less reports `2`: a member the suite could
+not exercise is unknown, not conformant.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 

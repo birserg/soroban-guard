@@ -9,11 +9,15 @@
  */
 import type { CheckResult, Suite } from "../core/types.ts";
 import { allowanceCheck } from "./checks/allowance.ts";
+import { approveCheck } from "./checks/approve.ts";
 import { balanceCheck } from "./checks/balance.ts";
+import { burnCheck } from "./checks/burn.ts";
+import { burnFromCheck } from "./checks/burn_from.ts";
 import { decimalsCheck } from "./checks/decimals.ts";
 import { nameCheck } from "./checks/name.ts";
 import { symbolCheck } from "./checks/symbol.ts";
 import { transferCheck } from "./checks/transfer.ts";
+import { transferFromCheck } from "./checks/transfer_from.ts";
 import type { Sep41Context } from "./context.ts";
 
 export type { Sep41Context } from "./context.ts";
@@ -88,6 +92,13 @@ export const sep41Suite: Suite<Sep41Context> = {
 		allowanceCheck,
 		nameCheck,
 		symbolCheck,
+		// Writes after reads: a read failure is cheap to learn and does not
+		// spend a ledger close. approve before the two _from checks, which
+		// each seed their own allowance but read better in clause order.
 		transferCheck,
+		approveCheck,
+		transferFromCheck,
+		burnCheck,
+		burnFromCheck,
 	],
 };

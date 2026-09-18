@@ -82,6 +82,19 @@ export function amountArg(amount: bigint): xdr.ScVal {
 }
 
 /**
+ * Encode a ledger-sequence argument. `approve` takes its expiration as a
+ * `u32`, not the `i128` amounts use — passing an amount-encoded value there
+ * traps on type mismatch, so the two encoders stay separate rather than
+ * inferring a width from the number.
+ */
+export function ledgerArg(ledger: number): xdr.ScVal {
+	if (!Number.isInteger(ledger) || ledger < 0 || ledger > 0xff_ff_ff_ff) {
+		throw new RangeError(`ledger sequence out of u32 range: ${ledger}`);
+	}
+	return nativeToScVal(ledger, { type: "u32" });
+}
+
+/**
  * I/O half: build the invocation against `source` and simulate it. Returns
  * the raw simulation response — decoding is `interpretSimulation`'s job.
  *
