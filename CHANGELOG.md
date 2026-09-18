@@ -15,6 +15,45 @@ log, not here.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-19
+
+The first check that changes state: `transfer` is verified by performing one.
+
+### Added
+
+- `transfer` check. Reads both balances, submits a signed transfer of one
+  unit, reads them again, and asserts the exact deltas. Reports the
+  before/after balances with the transaction hash and ledger as evidence.
+- `OWNER_SECRET` / `SPENDER_SECRET`. A secret settles its own address; one
+  that disagrees with a supplied `*_ADDRESS` exits rather than guessing
+  which was meant.
+- Write consent gate. A run holding a secret refuses unless the passphrase
+  is a test network (or `--allow-non-testnet-write` is given), the RPC
+  endpoint does not contradict it, and `SPENDER_ADDRESS` names an account
+  the operator controls. Funding is check-first, so a funded mainnet
+  account would otherwise reach a real transfer with nothing in the way.
+
+### Changed
+
+- Reads are one file per SEP-41 member, so an unassessed member is visible
+  in the directory listing rather than only at runtime.
+- Each account is defined once, carrying its address, signing authority and
+  whether it was generated for the run.
+
+### Fixed
+
+- Several situations that reported a conformant contract as FAIL, each
+  found against a real token on testnet: a holder or recipient that is the
+  asset issuer (transfers there mint or burn rather than move), a transfer
+  refused by the asset's own trustline or authorization policy, an address
+  holding no trustline, and a self-transfer. All now report UNVERIFIABLE.
+- A submission that never reached the ledger — RPC unreachable, an unfunded
+  signer, a stale sequence — was reported as the contract refusing. It now
+  propagates and the run records SKIPPED.
+- `name` and `symbol` no longer FAIL an empty value. SEP-41 constrains them
+  to `String` and no further, so the anomaly is reported rather than
+  accused.
+
 ## [0.1.0] — 2026-09-11
 
 First runnable slice: five SEP-41 read checks against testnet.

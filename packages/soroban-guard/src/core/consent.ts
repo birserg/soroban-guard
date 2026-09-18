@@ -14,6 +14,9 @@
 /** Passphrase for the network the CLI targets when none is supplied. */
 export const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 
+/** The public network, named so the host table can refer to it. */
+const PUBLIC_PASSPHRASE = "Public Global Stellar Network ; September 2015";
+
 /**
  * Networks where signing needs no override: the public test networks, plus
  * the standalone passphrase Quickstart uses for a local node.
@@ -33,11 +36,11 @@ const WRITE_SAFE_PASSPHRASES: readonly string[] = [
  * RPC is the normal case, not a suspicious one. Horizon hosts are absent
  * because Horizon is a different API and never serves as an RPC URL.
  */
-const KNOWN_RPC_HOSTS: ReadonlyMap<string, boolean> = new Map([
-	["soroban-testnet.stellar.org", true],
-	["rpc-futurenet.stellar.org", true],
-	["mainnet.sorobanrpc.com", false],
-	["soroban-rpc.mainnet.stellar.gateway.fm", false],
+const KNOWN_RPC_HOSTS: ReadonlyMap<string, string> = new Map([
+	["soroban-testnet.stellar.org", TESTNET_PASSPHRASE],
+	["rpc-futurenet.stellar.org", "Test SDF Future Network ; October 2022"],
+	["mainnet.sorobanrpc.com", PUBLIC_PASSPHRASE],
+	["soroban-rpc.mainnet.stellar.gateway.fm", PUBLIC_PASSPHRASE],
 ]);
 
 export function isWriteSafePassphrase(passphrase: string): boolean {
@@ -82,12 +85,14 @@ export function writeRefusalReason(input: ConsentInput): string | null {
 	if (!passphraseIsWriteSafe && !input.override) {
 		return `refusing to sign on "${input.passphrase}": write checks are testnet-only. Unset the *_SECRET variables to run reads, or pass --allow-non-testnet-write if you meant it.`;
 	}
-	const hostIsWriteSafe = KNOWN_RPC_HOSTS.get(canonicalHost(input.rpcHostname));
-	if (
-		hostIsWriteSafe !== undefined &&
-		hostIsWriteSafe !== passphraseIsWriteSafe
-	) {
-		return `network mismatch: passphrase "${input.passphrase}" does not match the ${hostIsWriteSafe ? "test" : "public"} network endpoint ${canonicalHost(input.rpcHostname)}. A transaction signed for one network is rejected by the other, which would report as the contract refusing. Fix whichever half is wrong.`;
+	// Exact, not by category: a passphrase names one specific network, and
+	// two test networks are as incompatible with each other as either is
+	// with the public one. Comparing write-safety would let a futurenet
+	// signature reach a testnet endpoint — the very mismatch this catches.
+	const host = canonicalHost(input.rpcHostname);
+	const expected = KNOWN_RPC_HOSTS.get(host);
+	if (expected !== undefined && expected !== input.passphrase) {
+		return `network mismatch: ${host} serves "${expected}", but this run signs for "${input.passphrase}". A transaction signed for one network is rejected by the other, which would report as the contract refusing. Fix whichever half is wrong.`;
 	}
 	return null;
 }

@@ -15,6 +15,8 @@ import {
 const MAINNET = "Public Global Stellar Network ; September 2015";
 const TESTNET_RPC = "soroban-testnet.stellar.org";
 const MAINNET_RPC = "mainnet.sorobanrpc.com";
+const FUTURENET = "Test SDF Future Network ; October 2022";
+const FUTURENET_RPC = "rpc-futurenet.stellar.org";
 
 function reason(over: Partial<Parameters<typeof writeRefusalReason>[0]> = {}) {
 	return writeRefusalReason({
@@ -72,6 +74,47 @@ describe("writeRefusalReason", () => {
 			override: true,
 		});
 		expect(refusal).toContain("network mismatch");
+	});
+
+	// Two test networks are as incompatible with each other as either is
+	// with the public one. A boolean write-safe comparison missed this
+	// entirely — both classify as safe, so the signature sailed through.
+	it.each([
+		["futurenet passphrase, testnet endpoint", FUTURENET, TESTNET_RPC],
+		[
+			"testnet passphrase, futurenet endpoint",
+			TESTNET_PASSPHRASE,
+			FUTURENET_RPC,
+		],
+	])(
+		"refuses a mismatch between two test networks: %s",
+		(_l, passphrase, host) => {
+			expect(reason({ passphrase, rpcHostname: host })).toContain(
+				"network mismatch",
+			);
+		},
+	);
+
+	it("allows each test network against its own endpoint", () => {
+		expect(
+			reason({ passphrase: FUTURENET, rpcHostname: FUTURENET_RPC }),
+		).toBeNull();
+		expect(
+			reason({ passphrase: TESTNET_PASSPHRASE, rpcHostname: TESTNET_RPC }),
+		).toBeNull();
+	});
+
+	// The override says "I mean to sign off testnet", not "skip the sanity
+	// check" — an unrelated private passphrase against a known public host
+	// is still a signature aimed at the wrong network.
+	it("refuses an unrelated passphrase on a known host even with the override", () => {
+		expect(
+			reason({
+				passphrase: "Some Private Network ; 2026",
+				rpcHostname: MAINNET_RPC,
+				override: true,
+			}),
+		).toContain("network mismatch");
 	});
 
 	// Self-hosted RPC is the normal case, not a suspicious one.
