@@ -27,8 +27,7 @@ const MARK: Record<CheckStatus, string> = {
 /**
  * Render a terminal report. Pure function — takes results, returns text,
  * prints nothing. Non-passing checks print their expectation and diagnostic
- * on indented follow-ups; a bare mark without the reason is a report that
- * hides its own evidence. The CHECKS.md emitter will share this shape later.
+ * on indented follow-ups. The CHECKS.md emitter will share this shape later.
  */
 export function renderReport(input: ReportInput): string {
 	const lines = [`${input.standard} Conformance — ${input.contractId}`, ""];

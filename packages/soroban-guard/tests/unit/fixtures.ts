@@ -1,4 +1,16 @@
-import { nativeToScVal, type rpc, type xdr } from "@stellar/stellar-sdk";
+import {
+	Account,
+	Address,
+	Keypair,
+	Networks,
+	nativeToScVal,
+	type rpc,
+	type xdr,
+} from "@stellar/stellar-sdk";
+import type { Signer } from "@stellar/stellar-sdk/contract";
+import { vi } from "vitest";
+import * as invoke from "../../src/core/invoke.ts";
+import type { Sep41Context } from "../../src/sep41/context.ts";
 
 // Canned simulation responses. Only the fields interpretSimulation reads
 // are real (retval/error/preamble); the rest are inert placeholders. A bare
@@ -57,4 +69,107 @@ export function restoreResponse(
 		...base,
 		restorePreamble: { minResourceFee: "0", transactionData: {} },
 	} as unknown as rpc.Api.SimulateTransactionResponse;
+}
+
+/**
+ * A server stub that answers each simulation with the next canned response
+ * in turn, so before/after reads can differ. Throws once exhausted:
+ * replaying the last response would let a future extra read pass silently
+ * against a stale answer. Each test states exactly the calls it expects,
+ * so an unplanned one is a finding.
+ */
+export function sequencedServer(
+	responses: readonly rpc.Api.SimulateTransactionResponse[],
+): rpc.Server {
+	let index = 0;
+	return {
+		simulateTransaction: async () => {
+			const response = responses[index];
+			index += 1;
+			if (response === undefined) {
+				throw new Error(
+					`stub exhausted: call ${index} of ${responses.length} planned`,
+				);
+			}
+			return response;
+		},
+	} as unknown as rpc.Server;
+}
+
+/**
+ * Pin submitWrite's answer without touching the network — a real write
+ * costs a ledger close. Returns the spy, so a test can also assert the
+ * submission never happened, or inspect the arguments it was given.
+ *
+ * `vi.spyOn` patches the module for every later test in the file, so the
+ * caller needs `vi.restoreAllMocks()` in an afterEach: a leaked stub
+ * reaches cases that must never submit at all.
+ */
+export function stubSubmit(result: invoke.SubmitResult) {
+	return vi.spyOn(invoke, "submitWrite").mockResolvedValue(result);
+}
+
+/**
+ * A submission that reached the ledger and failed there — as opposed to a
+ * simulation refusal, which never left the drawing board. The distinction
+ * decides FAIL vs UNVERIFIABLE on every write path.
+ */
+export function settledFailure(diagnostics: string): invoke.SubmitResult {
+	return { kind: "rejected", diagnostics, settled: true };
+}
+
+export const OWNER = Keypair.random().publicKey();
+export const SPENDER = Keypair.random().publicKey();
+
+export function signerFor(address: string): Signer {
+	return { address } as unknown as Signer;
+}
+
+/**
+ * A fully-signed context for write checks: both parties carry keys, so
+ * tests opt *out* of signing authority (ownerSigns/spenderSigns) rather
+ * than into it. Reads fixtures do the opposite and keep their own.
+ */
+export function writeCtx(
+	server: rpc.Server,
+	{ ownerSigns = true, spenderSigns = true } = {},
+): Sep41Context {
+	return {
+		server,
+		contractId: Address.contract(new Uint8Array(32)).toString(),
+		source: new Account(OWNER, "1"),
+		networkPassphrase: Networks.TESTNET,
+		specFunctions: null,
+		establishedAllowances: new Set(),
+		parties: {
+			owner: {
+				address: OWNER,
+				isThrowaway: false,
+				signer: ownerSigns ? signerFor(OWNER) : undefined,
+			},
+			spender: {
+				address: SPENDER,
+				isThrowaway: false,
+				signer: spenderSigns ? signerFor(SPENDER) : undefined,
+			},
+		},
+	};
+}
+
+export const APPLIED = {
+	kind: "applied",
+	txHash: "abc123",
+	ledger: 4738627,
+} as const;
+
+/**
+ * A refusal the contract itself issued, which is the common case under test.
+ *
+ * `settled: false` is the point: a rejection that reached the ledger and
+ * died there is not attributable to the contract, and the negative check
+ * reads exactly this flag to tell the two apart. Spelling it here keeps
+ * every call site stating the case it means.
+ */
+export function rejected(diagnostics: string): invoke.SubmitResult {
+	return { kind: "rejected", diagnostics, settled: false };
 }

@@ -9,6 +9,13 @@ import type { CheckResult, Suite } from "./types.ts";
  * that is not a verdict about the contract, so it is recorded as SKIPPED
  * with the error preserved, and the run continues. One bad check never
  * aborts the suite.
+ *
+ * Continuing is right for reads, which are cheap and independent. Once
+ * several write checks exist it will be worth noticing that a harness
+ * failure repeats — an unreachable RPC makes every remaining write throw in
+ * turn, each after its own submission attempt — and short-circuiting the
+ * rest rather than re-learning it. Six writes now share that exposure, so
+ * this is worth revisiting when a run's cost starts to matter.
  */
 export async function runSuite<Ctx>(
 	suite: Suite<Ctx>,

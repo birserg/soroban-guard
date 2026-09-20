@@ -40,12 +40,42 @@ describe("SEP41_MEMBERS", () => {
 });
 
 describe("suite coverage convention", () => {
-	it("every check id names a member of SEP41_MEMBERS", () => {
+	// An id is `sep41-<member>`, optionally with a `-suffix` naming a
+	// variant of that clause. Both forms must resolve to a member, or the
+	// check opens a phantom gap row beside itself.
+	it("every check id resolves to a member of SEP41_MEMBERS", () => {
 		expect(sep41Suite.checks.length).toBeGreaterThan(0);
 		for (const check of sep41Suite.checks) {
 			expect(check.id.startsWith("sep41-")).toBe(true);
-			expect(SEP41_MEMBERS).toContain(check.id.slice("sep41-".length));
+			const rest = check.id.slice("sep41-".length);
+			const member = SEP41_MEMBERS.find(
+				(m) => rest === m || rest.startsWith(`${m}-`),
+			);
+			expect(member, `${check.id} names no member`).toBeDefined();
 		}
+	});
+
+	// burn is a prefix of burn_from, so a shortest-first match would credit
+	// a burn_from check to burn and leave burn_from looking unassessed.
+	it("attributes a variant id to its longest matching member", () => {
+		const results = withCoverageGaps([
+			{
+				id: "sep41-burn_from-unauthorized",
+				clause: "SEP-41 §burn_from",
+				layer: "behavior",
+				requirement: "required",
+				status: "PASS",
+				expected: "x",
+				actual: "y",
+				evidence: {},
+				durationMs: 0,
+			},
+		]);
+		const gaps = results.filter(
+			(r) => r.actual === "not assessed by this suite",
+		);
+		expect(gaps.map((r) => r.id)).not.toContain("sep41-burn_from");
+		expect(gaps.map((r) => r.id)).toContain("sep41-burn");
 	});
 });
 

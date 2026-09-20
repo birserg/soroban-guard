@@ -15,6 +15,58 @@ log, not here.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-19
+
+Checks that change state: every state-changing SEP-41 member is verified by
+performing it against testnet — `transfer`, `approve`, `transfer_from`,
+`burn`, `burn_from` — plus a negative check proving an allowance-less
+`transfer_from` is refused. Ledger evidence (transaction hashes) is logged
+in `docs/verification.md`.
+
+### Added
+
+- Write checks for the five state-changing members. Each reads the before
+  state, submits a signed call of one unit, reads again, and asserts:
+  exact deltas for `transfer`, `transfer_from`, `burn`, `burn_from`;
+  exact replacement (not accumulation) for `approve`, which the spec says
+  overrides any existing allowance. Reports carry the before/after values
+  with transaction hash and ledger as evidence.
+- `transfer_from-unauthorized` negative check. Submits a spend with no
+  allowance and passes only when the contract refuses; runs before
+  `approve` so the grant cannot destroy the premise it tests.
+- `OWNER_SECRET` / `SPENDER_SECRET`. A secret settles its own address; one
+  that disagrees with a supplied `*_ADDRESS` exits rather than guessing
+  which was meant. Runs holding no key report writes UNVERIFIABLE.
+- Write consent gate. A run holding a secret exits before touching the
+  network unless the passphrase is a test network (or
+  `--allow-non-testnet-write` is given) and the RPC endpoint does not
+  contradict it. Funding is check-first, so a funded mainnet account would
+  otherwise reach a real transfer with nothing in the way. Recipient
+  control is enforced per check instead: a generated `SPENDER_ADDRESS` has
+  a key this process discards at exit, so any check that would move a unit
+  to it reports UNVERIFIABLE.
+
+### Changed
+
+- Reads are one file per SEP-41 member, so an unassessed member is visible
+  in the directory listing rather than only at runtime.
+- Each account is defined once, carrying its address, signing authority and
+  whether it was generated for the run.
+
+### Fixed
+
+- Several situations that reported a conformant contract as FAIL, each
+  found against a real token on testnet: a holder or recipient that is the
+  asset issuer (transfers there mint or burn rather than move), a transfer
+  refused by the asset's own trustline or authorization policy, an address
+  holding no trustline, and a self-transfer. All now report UNVERIFIABLE.
+- A submission that never reached the ledger — RPC unreachable, an unfunded
+  signer, a stale sequence — was reported as the contract refusing. It now
+  propagates and the run records SKIPPED.
+- `name` and `symbol` no longer FAIL an empty value. SEP-41 constrains them
+  to `String` and no further, so the anomaly is reported rather than
+  accused.
+
 ## [0.1.0] — 2026-09-11
 
 First runnable slice: five SEP-41 read checks against testnet.

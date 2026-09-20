@@ -33,13 +33,11 @@ export function specFunctionNames(spec: contract.Spec): readonly string[] {
  */
 function getErrorCode(error: unknown): number | null {
 	if (typeof error !== "object" || error === null) return null;
+	// Numeric only: the pinned SDK writes `code: 404` as a literal at every
+	// absence site in rpc/server.js. A string arm had no producer, which the
+	// "exactly-pinned shapes" rule above rules out rather than tolerates.
 	const code = (error as { code?: unknown }).code;
-	if (typeof code === "number") return code;
-	if (typeof code === "string" && code.trim() !== "") {
-		const parsed = Number(code);
-		return Number.isInteger(parsed) ? parsed : null;
-	}
-	return null;
+	return typeof code === "number" ? code : null;
 }
 
 function isNotFound(error: unknown): boolean {
