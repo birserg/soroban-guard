@@ -6,9 +6,15 @@
 Conformance testing for deployed [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)
 Soroban token contracts on Stellar **testnet**.
 
-> **Status: early.** Read checks (`decimals`, `balance`, `allowance`,
-> `name`, `symbol`) run against testnet; writes and negative checks are
-> next.
+> **Status: early.** All ten SEP-41 members are checked against testnet.
+> The five reads (`decimals`, `balance`, `allowance`, `name`, `symbol`) are
+> observed; the five writes (`transfer`, `approve`, `transfer_from`, `burn`,
+> `burn_from`) are performed — signed, submitted, and asserted against the
+> balances and allowances they moved. One negative check asserts that
+> `transfer_from` *refuses* a spender holding no allowance, which is the
+> shape of check that catches a missing authorization guard. See
+> [docs/verification.md](docs/verification.md) for a run and its
+> transaction hashes.
 
 ## Usage
 
@@ -20,7 +26,7 @@ pnpm install
 node packages/soroban-guard/src/cli.ts <contract-id>
 ```
 
-Against a real testnet token that looks like this:
+Against a real testnet token, with no keys configured:
 
 ```
 SEP-41 Conformance — CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM
@@ -28,19 +34,91 @@ SEP-41 Conformance — CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM
   ✓ sep41-decimals  returned 7
   ? sep41-balance  balance is 0 on a generated probe address; set OWNER_ADDRESS for a real assertion
     expected: non-negative balance for the holder
+  ? sep41-allowance  allowance is 0 between addresses that never interacted; set OWNER_ADDRESS and SPENDER_ADDRESS to a real approving pair
+    expected: non-negative allowance from owner to spender
   ✓ sep41-name  name is "Comet Pool Token"
   ✓ sep41-symbol  symbol is "CPAL"
+  ? sep41-transfer  no signing authority for the holder; set OWNER_SECRET to an account that both signs and holds this token
+    expected: transfer moves the amount from holder to recipient
+  ? sep41-transfer_from-unauthorized  no signing authority for the spender; set SPENDER_SECRET to attempt a spend the contract should refuse
+    expected: transfer_from refuses a spender with no allowance from the holder
+  ? sep41-approve  no signing authority for the holder; set OWNER_SECRET to the account granting the allowance
+    expected: approve sets the spender's allowance to the given amount
+  ? sep41-transfer_from  transfer_from needs both keys: OWNER_SECRET to grant the allowance and SPENDER_SECRET to spend it
+    expected: transfer_from moves the amount and consumes the spender's allowance
+  ? sep41-burn  no signing authority for the holder; set OWNER_SECRET to an account that both signs and holds this token
+    expected: burn removes the amount from the holder's balance
+  ? sep41-burn_from  burn_from needs both keys: OWNER_SECRET to grant the allowance and SPENDER_SECRET to spend it
+    expected: burn_from removes the amount from the holder and consumes the allowance
+
+3 pass, 0 fail, 0 skipped, 8 unverifiable, 0 not implemented (11 checks)
+by layer: interface 3/3 pass · behavior 0/8 pass
 ```
 
-Probe accounts are generated and funded from Friendbot per run. A generated
-probe holds none of the token under test, so balance and allowance report
-`UNVERIFIABLE` rather than a vacuous pass. Point them at an address that
+Every non-passing row says what it needs, so the report never implies
+coverage it does not have. A member no check assessed would appear the same
+way, as an explicit row rather than a silent omission.
+
+An unconfigured run generates probe addresses and funds the owner from
+Friendbot. A generated probe holds none of the token under test, so balance
+and allowance report `UNVERIFIABLE` rather than a vacuous pass. Point them at an address that
 actually holds the token for a real assertion:
 
 ```sh
 OWNER_ADDRESS=G... SPENDER_ADDRESS=G... \
   node packages/soroban-guard/src/cli.ts <contract-id>
 ```
+
+### Checking writes
+
+Five members change state, so they have to be signed. Without a key they
+report `UNVERIFIABLE` — never `FAIL`, because a missing key says nothing
+about the contract. `transfer` and `burn` need the holder's key;
+`transfer_from` and `burn_from` also need the spender's, since the clause
+specifies `spender.require_auth()`. Those two establish their own allowance
+rather than depending on `approve` having run first, so each check can be
+run alone:
+
+```sh
+OWNER_SECRET=$(stellar keys secret owner) \
+SPENDER_SECRET=$(stellar keys secret spender) \
+  node packages/soroban-guard/src/cli.ts <contract-id>
+```
+
+Each secret settles its own address, so `*_ADDRESS` is redundant alongside
+it — supply both only if you want the mismatch checked. Each write acts on
+**1 unit**, the smallest amount that proves movement, and reports the
+before/after quantities with the transaction hash and ledger.
+
+Use a spender that holds no allowance yet. Two checks need that absence as
+their premise — `transfer_from-unauthorized` has nothing to violate
+otherwise, and `approve` cannot observe a change if the allowance already
+equals the amount it would set. Both report UNVERIFIABLE rather than guess,
+so a second run against the same pair assesses less than the first. A fresh
+spender restores full coverage. A fresh spender needs the same setup as
+any other: funding, a trustline to the asset, and its signing key in
+`SPENDER_SECRET` — otherwise the checks report UNVERIFIABLE for the lack
+of standing rather than assessing anything.
+
+A full run is destructive in small ways worth knowing about: `burn` and
+`burn_from` each destroy one unit, irreversibly. `transfer` and
+`transfer_from` move one unit each to the spender. `approve` moves nothing
+but sets an allowance, and the two `_from` checks consume a standing
+allowance when one is large enough rather than overwriting it. A holder
+needs roughly four units plus XLM for fees to be assessed on every check;
+with less, the later checks honestly report UNVERIFIABLE.
+
+> **Testnet only, by default.** This signs and submits real transactions, so
+> a run that holds a secret exits before touching the network unless two
+> things agree: the passphrase must be a test network (or
+> `--allow-non-testnet-write` given), and the RPC endpoint must not
+> contradict it. Funding is check-first, so neither can be caught by the
+> faucet — an already-funded mainnet account would otherwise sail straight
+> through. Reads run anywhere and sign nothing.
+>
+> Recipient control is enforced per check rather than at that gate: a
+> generated `SPENDER_ADDRESS` has a key this process discards at exit, so
+> any check that would move a unit to it reports UNVERIFIABLE instead.
 
 ### Exit codes
 
@@ -50,9 +128,10 @@ OWNER_ADDRESS=G... SPENDER_ADDRESS=G... \
 | `1`  | a verified violation |
 | `2`  | unknown — the run failed, or members went unassessed |
 
-`2` is the honest answer while the suite covers 5 of SEP-41's 10 members:
-passing what it does check cannot establish conformance for `transfer` and
-friends, which it does not check yet.
+`0` requires every required member to have been assessed and passed, which
+in practice means a run configured with both keys against a token the
+holder actually holds. Anything less reports `2`: a member the suite could
+not exercise is unknown, not conformant.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 
@@ -66,9 +145,13 @@ interface correctly while behaving incorrectly.
 Existing tooling checks that a contract _exports_ the right functions. That
 cannot distinguish a correct `transfer` from one that omits `from.require_auth()`
 and lets anyone drain any balance. Those failures are behavioural, and
-behaviour requires execution — which is the roadmap: today the guard runs
-read checks, and the write path (transfers, approvals, negative checks that
-confirm the contract _rejects_ what it must reject) comes next.
+behaviour requires execution. That is why the write clauses are checked by
+actually performing them: the guard reads the balances and allowances involved,
+submits a signed call, reads them again, and reports the deltas with the
+transaction hash and ledger as evidence. `transfer_from-unauthorized` goes
+the other way — it attempts a spend with no allowance and passes only when
+the contract refuses, which is the shape of check a missing `require_auth`
+cannot survive.
 
 SEP-41 Guard takes a deployed contract address, exercises it against a live
 network, and reports which SEP-41 clauses it satisfies.
@@ -76,24 +159,50 @@ network, and reports which SEP-41 clauses it satisfies.
 ## Scope
 
 Conformance, not security. A passing report does **not** mean a token is safe:
-it says nothing about admin mint capability, upgradeability, blacklists, or
-fee-on-transfer behaviour — all of which are SEP-41-conformant and all of which
-can still cause loss.
+it says nothing about admin mint capability, upgradeability, or blacklists —
+all of which are SEP-41-conformant and all of which can still cause loss.
+
+A passing `transfer` does not by itself mean the contract checks
+authorization: an authorized move landing proves the happy path, not the
+refusal. `transfer_from-unauthorized` is what tests the other direction — it
+attempts a spend with no allowance and PASSes only when the contract refuses
+it. That is one clause covered this way; `transfer` and `burn` have no
+equivalent negative check yet, so a token missing `from.require_auth()`
+would still pass those.
+
+One judgement worth stating: a fee-on-transfer token, which credits the
+recipient less than it debits the sender, **FAILs** here. SEP-41 gives
+`transfer` no fee semantics, so crediting a different amount than was debited
+is a violation of the clause as written, not a variation the tool tolerates.
 
 ## Current limitations
 
 * Testnet only. Never place mainnet keys in `.env`.
 * Validated so far against a single SAC (Stellar Asset Contract) token.
   Custom WASM tokens exercise the same code paths but are not yet proven.
+* Custom WASM tokens are supported by design but unverified end to end. No
+  check is SAC-specific: members are called by name, and a WASM contract's
+  spec is the richer path — it says which members are declared, so
+  undeclared ones report NOT_IMPLEMENTED without spending a call, where a
+  SAC has no spec and every member is attempted blind. But every run in
+  [docs/verification.md](docs/verification.md) is against a SAC, so the
+  WASM path is exercised by unit tests alone.
 * SAC specifics the checks actually observe: `balance` and `allowance`
   against an address with no trustline trap with "trustline entry is
   missing", which is reported UNVERIFIABLE — no standing to ask — rather
   than FAIL. The issuer's own balance reads `i64::MAX` (issuers mint on
-  payout), so it cannot anchor a balance assertion; that one is a fixture
-  note in `.env.example`, not a branch in the code.
-* Events are not observed at all yet. No check reads topics, nothing
-  populates `evidence.events`, and the `events` layer exists only as a
-  label awaiting the write path.
+  payout), so it cannot anchor a balance assertion. `transfer` refuses to
+  judge any run the issuer takes part in — sending from one mints and
+  sending to one burns, so neither side's delta means what it appears to —
+  and reports UNVERIFIABLE before spending a ledger close.
+* Events are not observed. The writes land and their deltas are asserted,
+  but no check reads the topics a contract emits — so a token that moves
+  balances correctly while emitting wrong or missing `transfer` events
+  passes. Nothing populates `evidence.events`, and the `events` layer is a
+  label with no checks behind it.
+* `approve` sets an expiration 17,280 ledgers ahead (roughly a day) and
+  does not verify it was stored: `allowance()` returns the amount alone,
+  never its `live_until_ledger`.
 
 ## License
 
