@@ -97,16 +97,40 @@ export function mapReadOutcome(
 	};
 }
 
-/** How a read phrases each standing problem. */
+/**
+ * How a read phrases each standing problem.
+ *
+ * `null` is spelled as its own case and the fallthrough is typed `never`,
+ * so adding a `StandingProblem` fails this function at compile time rather
+ * than silently returning null. That default mattered: null means "not a
+ * standing problem", which sends the caller on to report FAIL — so a
+ * forgotten arm would accuse a conformant contract of a defect the asset's
+ * own policy caused.
+ */
 export function noStanding(diagnostics: string): string | null {
-	switch (classifyStanding(diagnostics)) {
+	const standing = classifyStanding(diagnostics);
+	switch (standing) {
 		case "no-trustline":
 			return "the address holds no trustline for this asset; point OWNER_ADDRESS at an address that holds this token";
 		case "not-authorized":
 			return "the address's trustline is not authorized by the asset issuer; the issuer must authorize it before any balance can be read";
-		default:
+		case null:
 			return null;
+		default:
+			return unreachable(standing);
 	}
+}
+
+/**
+ * Assert a union was handled exhaustively.
+ *
+ * Reached only if a new member was added without an arm, which the compiler
+ * catches first: the parameter is `never`, so the call itself fails to
+ * typecheck. The throw is for the runtime that a stale build could still
+ * reach — loud, rather than a wrong verdict.
+ */
+function unreachable(value: never): never {
+	throw new Error(`unhandled case: ${String(value)}`);
 }
 
 export function noStandingTrap(

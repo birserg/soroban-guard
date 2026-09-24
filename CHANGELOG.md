@@ -15,6 +15,28 @@ log, not here.
 
 ## [Unreleased]
 
+### Breaking
+
+- The CLI is invoked as `soroban-guard`, matching the package name. The
+  `sep41-guard` script name and usage string from 0.1.0 are gone.
+
+### Added
+
+- `--format text|md|json`. `md` emits a clause-mapped conformance report for
+  committing or review; `json` carries `schema`, `exitCode` and a per-status
+  summary for CI and the web UI.
+- Grouped, colour-coded terminal output when stdout is a TTY: checks are
+  grouped by layer, ids aligned, long diagnostics wrapped to the terminal
+  width. Honours `NO_COLOR`, and a piped or redirected run gets the plain
+  report so output stays greppable. `--no-color` forces plain.
+
+### Fixed
+
+- The `md` and `json` reports record the RPC endpoint's origin only. A
+  hosted provider's API key lives in the path or query string, and those
+  reports are made to be committed or carried through CI, so anything after
+  the origin is redacted rather than reproduced.
+
 ## [0.2.0] — 2026-09-19
 
 Checks that change state: every state-changing SEP-41 member is verified by

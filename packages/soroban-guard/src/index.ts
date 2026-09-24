@@ -7,8 +7,12 @@
  * `sep41/`, so a second standard plugs in without touching the runner.
  * Verify it with `git grep sep41 -- src/core` — it returns nothing.
  */
+export * from "./core/ansi.ts";
 export * from "./core/funding.ts";
 export * from "./core/invoke.ts";
+export * from "./core/json-report.ts";
+export * from "./core/md-report.ts";
+export * from "./core/pretty.ts";
 export * from "./core/report.ts";
 export * from "./core/runner.ts";
 export * from "./core/spec.ts";

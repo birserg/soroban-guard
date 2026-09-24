@@ -8,7 +8,12 @@
  * that could not reach the network must not be indistinguishable from a
  * contract that violated the spec.
  */
-import type { CheckLayer, CheckResult, CheckStatus } from "./types.ts";
+import {
+	type CheckResult,
+	type CheckStatus,
+	LAYER_ORDER,
+	STATUS_GLYPH,
+} from "./types.ts";
 
 export interface ReportInput {
 	readonly standard: string;
@@ -16,23 +21,17 @@ export interface ReportInput {
 	readonly results: readonly CheckResult[];
 }
 
-const MARK: Record<CheckStatus, string> = {
-	PASS: "✓",
-	FAIL: "✗",
-	SKIPPED: "○",
-	UNVERIFIABLE: "?",
-	NOT_IMPLEMENTED: "–",
-};
-
 /**
  * Render a terminal report. Pure function — takes results, returns text,
  * prints nothing. Non-passing checks print their expectation and diagnostic
- * on indented follow-ups. The CHECKS.md emitter will share this shape later.
+ * on indented follow-ups. The CHECKS.md emitter shares this shape.
  */
 export function renderReport(input: ReportInput): string {
 	const lines = [`${input.standard} Conformance — ${input.contractId}`, ""];
 	for (const result of input.results) {
-		lines.push(`  ${MARK[result.status]} ${result.id}  ${result.actual}`);
+		lines.push(
+			`  ${STATUS_GLYPH[result.status]} ${result.id}  ${result.actual}`,
+		);
 		if (result.status !== "PASS") {
 			lines.push(`    expected: ${result.expected}`);
 			if (result.evidence.error !== undefined) {
@@ -48,9 +47,8 @@ export function renderReport(input: ReportInput): string {
 			`${count("UNVERIFIABLE")} unverifiable, ${count("NOT_IMPLEMENTED")} not implemented ` +
 			`(${input.results.length} checks)`,
 	);
-	const layers: readonly CheckLayer[] = ["interface", "behavior", "events"];
 	const layerParts: string[] = [];
-	for (const layer of layers) {
+	for (const layer of LAYER_ORDER) {
 		const inLayer = input.results.filter((result) => result.layer === layer);
 		if (inLayer.length > 0) {
 			const layerPassed = inLayer.filter(
@@ -96,4 +94,31 @@ export function exitCodeFor(results: readonly CheckResult[]): number {
 		return 2;
 	}
 	return 0;
+}
+
+/**
+ * The RPC endpoint as it may appear in a persisted report.
+ *
+ * Hosted providers put API keys in the path or query string, and some
+ * endpoints carry `user:pass@` credentials — while the md report is meant
+ * to be committed and the json one to travel through CI artifacts. The
+ * origin identifies the network; everything after it is redacted rather
+ * than reproduced.
+ */
+export function publicRpcUrl(raw: string): string {
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		return "<unparseable>";
+	}
+	if (
+		url.pathname === "/" &&
+		url.search === "" &&
+		url.username === "" &&
+		url.password === ""
+	) {
+		return url.origin;
+	}
+	return `${url.origin}/…`;
 }
