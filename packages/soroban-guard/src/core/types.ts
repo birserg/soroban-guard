@@ -33,6 +33,50 @@ export type CheckStatus =
 export type CheckLayer = "interface" | "behavior" | "events";
 
 /**
+ * The order every report groups layers in — outermost first, so a reader
+ * meets "does it exist" before "does it behave".
+ *
+ * Declared beside the type rather than in each renderer: three of them
+ * group by layer, and three copies of the order is three chances for one
+ * report to contradict another about which section comes first.
+ */
+export const LAYER_ORDER = [
+	"interface",
+	"behavior",
+	"events",
+] as const satisfies readonly CheckLayer[];
+
+// Compile-time proof the order is complete: adding a CheckLayer without a
+// place here fails the build instead of silently dropping that layer from
+// every grouped report.
+type _MissingLayer = Exclude<CheckLayer, (typeof LAYER_ORDER)[number]>;
+const _layerOrderIsExhaustive: [_MissingLayer] extends [never] ? true : never =
+	true;
+
+/**
+ * One glyph per status, shared by every terminal renderer.
+ *
+ * The plain and pretty reports had identical copies of this. Two copies is
+ * how a ✗ becomes a ✘ in one report and not the other, and an operator who
+ * has learned to scan for one glyph then misses the failure in the other.
+ */
+export const STATUS_GLYPH: Record<CheckStatus, string> = {
+	PASS: "✓",
+	FAIL: "✗",
+	SKIPPED: "○",
+	UNVERIFIABLE: "?",
+	NOT_IMPLEMENTED: "–",
+};
+
+/** How many results carry this status. Every renderer needs it. */
+export function countByStatus(
+	results: readonly CheckResult[],
+	status: CheckStatus,
+): number {
+	return results.filter((result) => result.status === status).length;
+}
+
+/**
  * Whether the clause is mandatory. SEP-41 itself has no optionality
  * language — every member of its TokenInterface trait (including decimals,
  * name, symbol, burn, burn_from) is required, so today every SEP-41 check

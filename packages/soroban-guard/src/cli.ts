@@ -2,21 +2,35 @@
 import { parseArgs } from "node:util";
 import { type Account, Keypair, rpc, StrKey } from "@stellar/stellar-sdk";
 import { KeypairSigner } from "@stellar/stellar-sdk/contract";
+import { supportsColor } from "./core/ansi.ts";
 import { TESTNET_PASSPHRASE, writeRefusalReason } from "./core/consent.ts";
 import { fundAccount, loadSourceAccount } from "./core/funding.ts";
-import { exitCodeFor, renderReport } from "./core/report.ts";
+import { renderJsonReport } from "./core/json-report.ts";
+import { renderMarkdownReport } from "./core/md-report.ts";
+import { renderPretty } from "./core/pretty.ts";
+import { exitCodeFor, publicRpcUrl, renderReport } from "./core/report.ts";
 import { runSuite } from "./core/runner.ts";
 import { inspectContract } from "./core/spec.ts";
+import type { CheckResult } from "./core/types.ts";
 import type { Party, Sep41Context } from "./sep41/context.ts";
 import { sep41Suite, withCoverageGaps } from "./sep41/index.ts";
 
 const USAGE =
-	"usage: sep41-guard <contract-id> [--rpc-url URL] [--passphrase P] [--allow-http] [--allow-non-testnet-write]";
+	"usage: soroban-guard <contract-id> [--rpc-url URL] [--passphrase P] [--format text|md|json] [--no-color] [--allow-http] [--allow-non-testnet-write]";
+
+const FORMATS = ["text", "md", "json"] as const;
+type Format = (typeof FORMATS)[number];
+
+function isFormat(value: string): value is Format {
+	return (FORMATS as readonly string[]).includes(value);
+}
 
 let positionals: string[];
 let values: {
 	"rpc-url"?: string;
 	passphrase?: string;
+	format?: string;
+	"no-color"?: boolean;
 	"allow-http"?: boolean;
 	"allow-non-testnet-write"?: boolean;
 	help?: boolean;
@@ -27,6 +41,8 @@ try {
 		options: {
 			"rpc-url": { type: "string" },
 			passphrase: { type: "string" },
+			format: { type: "string" },
+			"no-color": { type: "boolean" },
 			"allow-http": { type: "boolean" },
 			"allow-non-testnet-write": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
@@ -147,6 +163,15 @@ function resolvePassphrase(value: string | undefined): string {
 	return value;
 }
 
+const rawFormat = nonEmpty(values.format) ?? "text";
+if (!isFormat(rawFormat)) {
+	console.error(
+		`invalid --format: ${rawFormat} (expected ${FORMATS.join(", ")})`,
+	);
+	process.exit(2);
+}
+const format: Format = rawFormat;
+
 const rpcUrl = (
 	nonEmpty(values["rpc-url"]) ??
 	nonEmpty(process.env.SOROBAN_RPC_URL) ??
@@ -158,6 +183,10 @@ try {
 	console.error(`invalid RPC URL: ${rpcUrl}`);
 	process.exit(2);
 }
+// Redacted once, at the boundary: everything downstream (md committed to
+// git, json travelling through CI artifacts) must only ever see the safe
+// form, never the raw URL with its embedded keys.
+const reportedRpcUrl = publicRpcUrl(rpcUrl);
 const networkPassphrase = resolvePassphrase(
 	values.passphrase ?? process.env.NETWORK_PASSPHRASE,
 );
@@ -166,6 +195,40 @@ const parties = {
 	owner: resolveRole("OWNER", networkPassphrase),
 	spender: resolveRole("SPENDER", networkPassphrase),
 };
+
+/**
+ * One render path for every output site — the early exits and the full run.
+ *
+ * `ranAt` is taken once rather than inside each renderer: the run has a
+ * single timestamp, and a renderer that read the clock itself could not be
+ * tested against a fixed expectation.
+ */
+const ranAt = new Date().toISOString();
+// Rebound as a non-optional local: the `process.exit` above proves it is
+// set, but that narrowing does not follow a `const` into a function body.
+const target: string = contractId;
+function render(results: readonly CheckResult[]): string {
+	const common = {
+		standard: sep41Suite.standard,
+		contractId: target,
+		results,
+	};
+	if (format === "json") {
+		return renderJsonReport({ ...common, ranAt, rpcUrl: reportedRpcUrl });
+	}
+	if (format === "md") {
+		return renderMarkdownReport({ ...common, ranAt, rpcUrl: reportedRpcUrl });
+	}
+	if (values["no-color"] === true || !process.stdout.isTTY) {
+		// Piped or colour-refused: the plain renderer is the greppable one.
+		return renderReport(common);
+	}
+	return renderPretty({
+		...common,
+		color: supportsColor(process.stdout),
+		width: process.stdout.columns ?? 100,
+	});
+}
 
 const refusal = writeRefusalReason({
 	willSign:
@@ -196,9 +259,7 @@ try {
 	const inspected = await inspectContract(server, contractId);
 	if (inspected.kind === "missing") {
 		console.error(`no contract found at ${contractId}`);
-		console.log(
-			renderReport({ standard: sep41Suite.standard, contractId, results: [] }),
-		);
+		console.log(render([]));
 		process.exit(2);
 	}
 	specFunctions = inspected.kind === "wasm" ? inspected.functions : null;
@@ -220,9 +281,7 @@ try {
 	console.error(
 		`cannot prepare run: ${error instanceof Error ? error.message : String(error)}`,
 	);
-	console.log(
-		renderReport({ standard: sep41Suite.standard, contractId, results: [] }),
-	);
+	console.log(render([]));
 	process.exit(2);
 }
 const ctx: Sep41Context = {
@@ -242,9 +301,7 @@ const assessed = await runSuite(sep41Suite, ctx);
 // passes every check it happens to own would exit 0 — "verified conformant"
 // — while the members it never examined went unreported.
 const results = withCoverageGaps(assessed);
-console.log(
-	renderReport({ standard: sep41Suite.standard, contractId, results }),
-);
+console.log(render(results));
 // 0 = verified conformant, 1 = verified violation, 2 = unknown (see
 // exitCodeFor). SKIPPED/UNVERIFIABLE are not contract verdicts and must
 // never exit 1.
