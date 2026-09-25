@@ -39,7 +39,14 @@ or read the guard's message, which says exactly this.
 ## Run of 2026-09-19
 
 Against `CAJLPKZHDCHRMELESHIYGTRR2SXKEQMYWNNGLOLIZ4U2HLGHTXZXSLLY`, a SAC
-for a test asset, with both keys configured:
+for a test asset, with both keys configured.
+
+> This log is what that run printed, kept as it was. The suite has grown
+> since — five negative checks landed after it, so a run today reports
+> sixteen rows rather than eleven, and those five have not yet been
+> exercised against a live contract. A log is evidence of what happened,
+> so it is appended to rather than edited; the newer checks will appear in
+> their own dated entry.
 
 ```
 SEP-41 Conformance — CAJLPKZHDCHRMELESHIYGTRR2SXKEQMYWNNGLOLIZ4U2HLGHTXZXSLLY

@@ -7,6 +7,7 @@ import { rpc, type xdr } from "@stellar/stellar-sdk";
 import {
 	type InvokeResult,
 	interpretSimulation,
+	type SubmitResult,
 	simulateRead,
 } from "../../core/invoke.ts";
 import type { CheckResult } from "../../core/types.ts";
@@ -78,14 +79,31 @@ export function verdictHelpers(meta: CheckMeta, expected: string) {
 		unverifiable(
 			actual: string,
 			durationMs: number,
-			error?: string,
+			/**
+			 * A diagnostic string, or the whole evidence bag when there is
+			 * more to record than one.
+			 *
+			 * The string form is what most call sites want and stays the
+			 * default. But a submission that reached the ledger and failed
+			 * there carries a transaction hash, and the string-only
+			 * signature was silently dropping it at six sites — a reader
+			 * told the write "failed on-chain" with nothing to look it up
+			 * by. Widening here fixes all six rather than teaching each to
+			 * hand-roll a literal.
+			 */
+			evidence?: string | CheckResult["evidence"],
 		): CheckResult {
 			return {
 				...meta,
 				status: "UNVERIFIABLE",
 				expected,
 				actual,
-				evidence: error === undefined ? {} : { error },
+				evidence:
+					evidence === undefined
+						? {}
+						: typeof evidence === "string"
+							? { error: evidence }
+							: evidence,
 				durationMs,
 			};
 		},
@@ -183,6 +201,43 @@ export async function callRead(
  */
 export const SETTLED_FAILURE_ACTUAL =
 	"the write reached the ledger and failed there rather than being refused by the contract; the cause is not recoverable from the response";
+
+/**
+ * Evidence for a setup step that did not produce something to assert on.
+ *
+ * A timeout that named its hash keeps it — the attempt may yet apply and a
+ * reader has to look it up. A settled rejection keeps its diagnostics plus
+ * whatever handle the ledger gave it. Anything without a handle yields
+ * undefined, and the caller reports no evidence rather than an empty one.
+ * One function for the three `_from` setups, for the usual reason: the
+ * hash-dropping variant of this already shipped once.
+ */
+export function setupEvidence(
+	result: SubmitResult,
+): CheckResult["evidence"] | undefined {
+	if (result.kind === "applied") {
+		throw new Error("setupEvidence needs a non-applied submission");
+	}
+	if (result.kind === "timeout") {
+		return result.txHash === "" ? undefined : { txHash: result.txHash };
+	}
+	if (result.kind === "restore") {
+		return { error: result.diagnostics };
+	}
+	// Explicit, not fallthrough: a future SubmitResult kind must fail loudly
+	// here rather than inherit rejected-shaped evidence, the same guarantee
+	// refusal.ts makes for verdicts.
+	if (result.kind !== "rejected") {
+		throw new Error(
+			`unhandled submission kind: ${(result as { kind: string }).kind}`,
+		);
+	}
+	return {
+		error: result.diagnostics,
+		...(result.txHash === undefined ? {} : { txHash: result.txHash }),
+		...(result.ledger === undefined ? {} : { ledger: result.ledger }),
+	};
+}
 
 export type StandingProblem = "no-trustline" | "not-authorized";
 

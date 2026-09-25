@@ -22,6 +22,21 @@ log, not here.
 
 ### Added
 
+- Five negative checks, four on `transfer` and one on `transfer_from`.
+
+  Three require a refusal: moving more than the holder's balance (allowing
+  it mints or wraps, letting a holder spend value never issued), a negative
+  amount (`i128` is signed, and reading one as a reversed transfer lets
+  anyone withdraw from anyone), and spending a grant whose
+  `live_until_ledger` has passed (a contract that stores the amount and
+  drops the deadline leaves every approval it ever made permanent). The
+  last has to create the expiry it tests, because `allowance()` reports the
+  amount but never the ledger it dies at.
+
+  Two assert arithmetic instead, because SEP-41 permits either answer: a
+  zero-amount transfer and a self-transfer must leave the balances where
+  they started, whether the contract accepts or refuses them — only a
+  balance that moved is a finding.
 - `--format text|md|json`. `md` emits a clause-mapped conformance report for
   committing or review; `json` carries `schema`, `exitCode` and a per-status
   summary for CI and the web UI.
