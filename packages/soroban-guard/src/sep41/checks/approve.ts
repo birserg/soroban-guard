@@ -98,6 +98,17 @@ export async function submitApproval(
 	ctx: Sep41Context,
 	amount: bigint,
 	currentLedger: number,
+	/**
+	 * Ledgers the grant should live for, when the caller needs something
+	 * other than the usual day.
+	 *
+	 * The expiry check wants a grant that lapses within the run, which is
+	 * the one case where a shorter life is the point rather than a mistake.
+	 * A grant made this way is deliberately **not** registered: the registry
+	 * means "fresh, so a refusal is the contract's answer", and a grant
+	 * built to expire is the opposite of that claim.
+	 */
+	lifetimeLedgers: number = EXPIRATION_LEDGERS,
 ): Promise<ReturnType<typeof submitWrite>> {
 	const { owner, spender } = ctx.parties;
 	if (owner.signer === undefined) {
@@ -112,13 +123,13 @@ export async function submitApproval(
 				addressArg(owner.address),
 				addressArg(spender.address),
 				amountArg(amount),
-				ledgerArg(currentLedger + EXPIRATION_LEDGERS),
+				ledgerArg(currentLedger + lifetimeLedgers),
 			],
 			signer: owner.signer,
 		},
 		ctx.networkPassphrase,
 	);
-	if (result.kind === "applied") {
+	if (result.kind === "applied" && lifetimeLedgers === EXPIRATION_LEDGERS) {
 		ctx.establishedAllowances.add(grantKey(owner.address, spender.address));
 	}
 	return result;
@@ -211,11 +222,15 @@ export const approveCheck = {
 			// expired footprint. None of that reached the contract's logic, so
 			// a FAIL here would accuse it of a refusal it never made.
 			if (submitted.settled) {
-				return unverifiable(
-					SETTLED_FAILURE_ACTUAL,
-					elapsed(),
-					submitted.diagnostics,
-				);
+				return unverifiable(SETTLED_FAILURE_ACTUAL, elapsed(), {
+					error: submitted.diagnostics,
+					...(submitted.txHash === undefined
+						? {}
+						: { txHash: submitted.txHash }),
+					...(submitted.ledger === undefined
+						? {}
+						: { ledger: submitted.ledger }),
+				});
 			}
 			const standing = classifyStanding(submitted.diagnostics);
 			if (standing !== null) {
@@ -343,11 +358,15 @@ export const approveCheck = {
 			// expired footprint. None of that reached the contract's logic, so
 			// a FAIL here would accuse it of a refusal it never made.
 			if (confirmed.settled) {
-				return unverifiable(
-					SETTLED_FAILURE_ACTUAL,
-					elapsed(),
-					confirmed.diagnostics,
-				);
+				return unverifiable(SETTLED_FAILURE_ACTUAL, elapsed(), {
+					error: confirmed.diagnostics,
+					...(confirmed.txHash === undefined
+						? {}
+						: { txHash: confirmed.txHash }),
+					...(confirmed.ledger === undefined
+						? {}
+						: { ledger: confirmed.ledger }),
+				});
 			}
 			const standing = classifyStanding(confirmed.diagnostics);
 			if (standing !== null) {

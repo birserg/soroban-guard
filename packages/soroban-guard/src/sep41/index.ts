@@ -14,8 +14,15 @@ import { balanceCheck } from "./checks/balance.ts";
 import { burnCheck } from "./checks/burn.ts";
 import { burnFromCheck } from "./checks/burn_from.ts";
 import { decimalsCheck } from "./checks/decimals.ts";
+import { expiredAllowanceCheck } from "./checks/expired-allowance.ts";
 import { nameCheck } from "./checks/name.ts";
 import { unauthorizedTransferFromCheck } from "./checks/negative.ts";
+import { negativeAmountTransferCheck } from "./checks/negative-amount.ts";
+import {
+	selfTransferCheck,
+	zeroAmountTransferCheck,
+} from "./checks/no-op-transfer.ts";
+import { overBalanceTransferCheck } from "./checks/over-balance.ts";
 import { symbolCheck } from "./checks/symbol.ts";
 import { transferCheck } from "./checks/transfer.ts";
 import { transferFromCheck } from "./checks/transfer_from.ts";
@@ -123,10 +130,30 @@ export const sep41Suite: Suite<Sep41Context> = {
 		// since a correct contract refuses at simulation and touches no
 		// state at all.
 		unauthorizedTransferFromCheck,
+		// Refusal checks before the moves they would otherwise be starved by:
+		// over-balance needs a readable balance, not a large one, and it
+		// spends nothing when the contract behaves — but a holder drained to
+		// zero by the writes below makes `balance + 1` equal 1, which a
+		// contract could refuse for having nothing at all rather than for
+		// checking its floor.
+		overBalanceTransferCheck,
+		negativeAmountTransferCheck,
+		// The two whose answer is arithmetic rather than a refusal. They move
+		// nothing when the contract is correct, so they cost no balance and
+		// sit with the other refusal checks ahead of the spending writes.
+		zeroAmountTransferCheck,
+		selfTransferCheck,
 		transferCheck,
 		approveCheck,
 		transferFromCheck,
 		burnCheck,
 		burnFromCheck,
+		// Last: the only check that waits on wall-clock time. It approves a
+		// grant built to lapse, waits ~10s for the ledger to pass it, then
+		// spends — so running it earlier would delay every verdict behind it
+		// for a question none of them depend on. Its own allowance is
+		// deliberately unregistered, so it cannot disturb the _from checks
+		// above either.
+		expiredAllowanceCheck,
 	],
 };

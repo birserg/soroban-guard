@@ -46,9 +46,9 @@ describe.skipIf(!(OWNER && SPENDER))("SEP-41 suite against nothing", () => {
 		};
 		const assessed = await runSuite(sep41Suite, ctx);
 		const results = withCoverageGaps(assessed);
-		// Eleven checks even against nothing deployed: the count pins the
+		// Sixteen checks even against nothing deployed: the count pins the
 		// suite size so growth without updating this file fails loudly.
-		expect(results).toHaveLength(11);
+		expect(results).toHaveLength(16);
 		// By id, never by position: positional slices broke silently every
 		// time the suite grew, and these tests only run with env configured.
 		const byId = (id: string) => results.find((r) => r.id === id);

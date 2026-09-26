@@ -37,9 +37,9 @@ describe.skipIf(!(CONTRACT && OWNER && SPENDER))(
 			};
 			const assessed = await runSuite(sep41Suite, ctx);
 			const results = withCoverageGaps(assessed);
-			// Eleven checks, no gaps: if the suite grows or shrinks without
+			// Sixteen checks, no gaps: if the suite grows or shrinks without
 			// this file following, the count fails first, not silently.
-			expect(results).toHaveLength(11);
+			expect(results).toHaveLength(16);
 			// Asserted by id, never by position. Positional slices broke
 			// silently every time the suite grew, and these tests only run
 			// with env configured — so CI never caught it.

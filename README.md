@@ -10,10 +10,16 @@ Soroban token contracts on Stellar **testnet**.
 > The five reads (`decimals`, `balance`, `allowance`, `name`, `symbol`) are
 > observed; the five writes (`transfer`, `approve`, `transfer_from`, `burn`,
 > `burn_from`) are performed — signed, submitted, and asserted against the
-> balances and allowances they moved. One negative check asserts that
-> `transfer_from` *refuses* a spender holding no allowance, which is the
-> shape of check that catches a missing authorization guard. See
-> [docs/verification.md](docs/verification.md) for a run and its
+> balances and allowances they moved.
+>
+> Six further checks assert what a contract must *refuse* or must leave
+> alone — an unauthorized spend, more than the balance, a negative amount,
+> a lapsed allowance, a zero transfer, a self-transfer. These are the shape
+> that catches a missing authorization guard or a missing bounds check,
+> because a contract lacking either behaves identically to a correct one
+> whenever the request is legitimate. See
+> [docs/check-reference.md](docs/check-reference.md) for what each proves
+> and [docs/verification.md](docs/verification.md) for a run and its
 > transaction hashes.
 
 ## Usage
@@ -38,10 +44,18 @@ SEP-41 Conformance — CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM
     expected: non-negative allowance from owner to spender
   ✓ sep41-name  name is "Comet Pool Token"
   ✓ sep41-symbol  symbol is "CPAL"
-  ? sep41-transfer  no signing authority for the holder; set OWNER_SECRET to an account that both signs and holds this token
-    expected: transfer moves the amount from holder to recipient
   ? sep41-transfer_from-unauthorized  no signing authority for the spender; set SPENDER_SECRET to attempt a spend the contract should refuse
     expected: transfer_from refuses a spender with no allowance from the holder
+  ? sep41-transfer-over-balance  no signing authority for the holder; set OWNER_SECRET to attempt a transfer the contract should refuse
+    expected: transfer refuses to move more than the holder's balance
+  ? sep41-transfer-negative-amount  no signing authority for the holder; set OWNER_SECRET to attempt a transfer the contract should refuse
+    expected: transfer refuses a negative amount
+  ? sep41-transfer-zero-amount  no signing authority for the holder; set OWNER_SECRET to attempt a transfer that must not move value
+    expected: a transfer of zero leaves both balances unchanged
+  ? sep41-transfer-self  no signing authority for the holder; set OWNER_SECRET to attempt a transfer that must not move value
+    expected: a transfer to oneself leaves the balance unchanged
+  ? sep41-transfer  no signing authority for the holder; set OWNER_SECRET to an account that both signs and holds this token
+    expected: transfer moves the amount from holder to recipient
   ? sep41-approve  no signing authority for the holder; set OWNER_SECRET to the account granting the allowance
     expected: approve sets the spender's allowance to the given amount
   ? sep41-transfer_from  transfer_from needs both keys: OWNER_SECRET to grant the allowance and SPENDER_SECRET to spend it
@@ -50,9 +64,11 @@ SEP-41 Conformance — CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM
     expected: burn removes the amount from the holder's balance
   ? sep41-burn_from  burn_from needs both keys: OWNER_SECRET to grant the allowance and SPENDER_SECRET to spend it
     expected: burn_from removes the amount from the holder and consumes the allowance
+  ? sep41-transfer_from-expired  expired-allowance needs both keys: OWNER_SECRET to grant the allowance and SPENDER_SECRET to attempt the spend
+    expected: transfer_from refuses a spend against an allowance whose live_until_ledger has passed
 
-3 pass, 0 fail, 0 skipped, 8 unverifiable, 0 not implemented (11 checks)
-by layer: interface 3/3 pass · behavior 0/8 pass
+3 pass, 0 fail, 0 skipped, 13 unverifiable, 0 not implemented (16 checks)
+by layer: interface 3/3 pass · behavior 0/13 pass
 ```
 
 Every non-passing row says what it needs, so the report never implies
@@ -103,10 +119,24 @@ of standing rather than assessing anything.
 A full run is destructive in small ways worth knowing about: `burn` and
 `burn_from` each destroy one unit, irreversibly. `transfer` and
 `transfer_from` move one unit each to the spender. `approve` moves nothing
-but sets an allowance, and the two `_from` checks consume a standing
-allowance when one is large enough rather than overwriting it. A holder
-needs roughly four units plus XLM for fees to be assessed on every check;
-with less, the later checks honestly report UNVERIFIABLE.
+but overwrites any standing allowance between the pair, while the two
+`_from` checks consume one rather than overwriting it.
+
+The six negative checks cost nothing on a conformant token: four attempt
+something the contract must refuse — a spend with no allowance, more than
+the balance, a negative amount, a lapsed allowance — and two move nothing
+by construction, a zero transfer and a self-transfer. One exception:
+`transfer_from-expired` sets up with a real approval, overwriting any
+standing allowance between the pair with a grant that lapses within two
+ledgers. A token that does not
+refuse them spends more than this, which is the finding those checks exist
+to produce.
+
+So a holder needs roughly four units plus XLM for fees to be assessed on
+every check; with less, the later checks honestly report UNVERIFIABLE. One
+caveat on time rather than tokens: `transfer_from-expired` has to wait for
+a ledger to pass before it can spend, which adds about ten seconds to a
+keyed run.
 
 > **Testnet only, by default.** This signs and submits real transactions, so
 > a run that holds a secret exits before touching the network unless two

@@ -1,8 +1,11 @@
 # Checks reference
 
-What each of the eleven checks proves, needs, and reports. The suite runs
-them in the order below: reads first (cheap, no keys), then the negative
-check (needs no allowance to exist yet), then the writes.
+What each of the sixteen checks proves, needs, and reports, in the order the
+suite runs them: five reads first, since they are cheap and need no keys;
+then five of the six negative checks, which cost nothing on a conformant token and
+whose premises the writes below would destroy; then the five writes that
+actually move value. The sixth, the expiry check, runs last, because it is the
+only one that waits on a ledger to close.
 
 A premise is what must be true *before* the check can say anything at all.
 When a premise is missing the check reports UNVERIFIABLE — never FAIL,
@@ -45,9 +48,15 @@ state with the transaction hash and ledger as evidence — but the family
 varies: `transfer_from-unauthorized` passes on a refusal and records the
 refusal's error text instead of a transaction, and `approve` sets an
 absolute allowance (including a confirming second approval of 2) rather
-than a delta. A holder needs roughly four units plus XLM for fees for the
-full suite to assess everything; with less, later checks honestly report
-UNVERIFIABLE.
+than a delta.
+
+A holder needs roughly four units plus XLM for fees for the full suite to
+assess everything; with less, later checks honestly report UNVERIFIABLE.
+Four rather than one per write, because only `transfer`, `transfer_from`,
+`burn` and `burn_from` spend anything on a conformant token: the refusal
+checks are refused, the zero transfer moves nothing, and the self-transfer
+returns what it sends. A token that does *not* refuse them spends more —
+which is itself the finding.
 
 ### `sep41-transfer_from-unauthorized` — behavior
 
@@ -59,6 +68,58 @@ asset issuer, the holder and spender differ, the spender is not a generated
 address, and the spender's signer signs as the spender. Needs the spender's
 key. Runs before `approve`, which would otherwise grant the allowance whose
 absence is the premise.
+
+### `sep41-transfer-over-balance` — behavior
+
+Attempts to move `balance + 1` and **passes only when the contract
+refuses** — a balance is a count of units that exist, so a transfer taking
+it below zero has nothing to move. A contract that allows it either mints
+silently or wraps the subtraction, and both let a holder spend value that
+was never issued. Invisible to `sep41-transfer`, which moves an amount the
+holder does own and behaves identically either way.
+
+One unit past the balance rather than a huge number: a contract could
+reject `u128::MAX` for an encoding reason that says nothing about its
+arithmetic. Premise: the holder's balance is readable, neither party is the
+asset issuer, the two differ, and the recipient is not a generated address
+— a contract that wrongly allowed this would move the whole balance
+somewhere unrecoverable. Needs the holder's key. Runs before the spending
+writes, which would otherwise leave `balance + 1` equal to 1, refusable for
+having nothing at all rather than for checking a floor.
+
+### `sep41-transfer-negative-amount` — behavior
+
+Attempts a transfer of `-1` and **passes only when the contract refuses**.
+SEP-41 types amounts as `i128`, which is signed, so a negative value
+encodes cleanly and reaches the contract. The obvious implementation of one
+is a reversed transfer: `transfer(attacker, victim, -1)` debits the victim
+while the authorization check passes on the attacker — anyone can withdraw
+from anyone. On a FAIL the direction the balance moved names which bug it
+is: the holder gaining means the sign was honoured and the transfer ran
+backwards; the holder losing means the sign was discarded; an unchanged
+balance means the call was accepted without moving anything. Premises
+match over-balance; needs the holder's key.
+
+### `sep41-transfer-zero-amount` — behavior
+
+Transfers `0` and asserts the balance **did not change**. Unlike the
+refusal checks, both answers are conformant: SEP-41 imposes no rule on a
+zero amount, so a contract may accept it as a no-op or reject it, and
+asserting "must reject" would invent a requirement and FAIL a correct
+token. The FAIL is a balance that moved — a contract minting or burning on
+a zero transfer. Needs the holder's key and a distinct recipient; no
+minimum balance, since zero moves nothing even from an empty account.
+
+### `sep41-transfer-self` — behavior
+
+Transfers one unit from the holder to itself and asserts the balance
+**netted zero**. Same rule as the zero case: refusing and accepting are
+both conformant, so only a change is a finding — a contract that debits
+without crediting when both addresses match loses a unit on every
+self-send. Needs the holder's key and at least one unit, or a refusal would
+mean "empty account" rather than anything about self-transfers. The
+recipient is the holder by construction, so `SPENDER_ADDRESS` is
+irrelevant.
 
 ### `sep41-transfer` — behavior
 
@@ -96,6 +157,28 @@ no `total_supply`, so a mint elsewhere during the burn is invisible.
 Burns one unit as the spender, asserting holder `-1`, allowance `-1`, and
 spender `0` — a debited spender alongside would be double-spending. Needs
 both keys. Irreversible.
+
+### `sep41-transfer_from-expired` — behavior
+
+Approves a grant with a deliberately short `live_until_ledger`, waits for
+the ledger to pass it, then spends — and **passes only when the contract
+refuses**. A contract that stores the amount and ignores the deadline
+leaves every approval permanent: a spender authorized once can return
+later and spend again. No read distinguishes the two, because
+`allowance()` returns the amount alone and never the ledger it dies at.
+
+The only check that creates the condition it tests, and the only one that
+waits on wall-clock time — roughly ten seconds, bounded at 45. A network
+that does not advance reports UNVERIFIABLE rather than hanging. Its grant
+is deliberately **not** recorded in the run's allowance registry: that
+registry means "fresh, so a refusal is the contract's answer", which is
+the opposite of a grant built to lapse. Needs both keys, a funded holder,
+and non-issuer parties. Runs last, so its wait delays nothing else.
+Side effect to know: the setup approval overwrites any standing allowance
+between the pair with a grant that lapses within two ledgers — after the
+run the operator's grant is effectively zero, even where `approveCheck`
+left it alone. Unlike the `_from` checks, which consume rather than
+replace, this one cannot test expiry without granting first.
 
 ## Verdicts
 

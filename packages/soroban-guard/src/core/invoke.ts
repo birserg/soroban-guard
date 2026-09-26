@@ -78,6 +78,18 @@ export type SubmitResult =
 			 * reworded.
 			 */
 			readonly settled: boolean;
+			/**
+			 * The transaction, when one reached the ledger to be looked up.
+			 *
+			 * Only a `settled` rejection has one: a refusal thrown at
+			 * simulation never became a transaction. Carried as a field
+			 * rather than left inside the diagnostics sentence, so a report
+			 * can put it where a reader chases hashes instead of leaving it
+			 * to be parsed out of prose.
+			 */
+			readonly txHash?: string;
+			/** Ledger the failed transaction was included in, when known. */
+			readonly ledger?: number;
 	  }
 	| { readonly kind: "restore"; readonly diagnostics: string }
 	| { readonly kind: "timeout"; readonly txHash: string };
@@ -293,6 +305,8 @@ export async function submitWrite(
 		return {
 			kind: "rejected",
 			settled: true,
+			...(txHash === "" ? {} : { txHash }),
+			...(settled.ledger === undefined ? {} : { ledger: settled.ledger }),
 			diagnostics:
 				txHash === ""
 					? "transaction failed on-chain; no transaction hash was observed"
